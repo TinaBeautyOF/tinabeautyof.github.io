@@ -22,14 +22,16 @@
         <button id="back-btn" class="back-btn hidden">&#8249;</button>
         <h1 id="view-title">TinaBeauty</h1>
       </div>
-      <button id="header-action" class="header-btn hidden">+</button>
+      <div class="header-right">
+        <button id="header-action" class="header-btn hidden">+</button>
+      </div>
     </div>
   </header>
 
-  <!-- MAIN CONTENT -->
+  <!-- MAIN -->
   <main id="content">
 
-    <!-- Vue Accueil -->
+    <!-- Accueil -->
     <section id="view-accueil" class="view active">
       <div class="logo-banner">
         <div class="logo-circle">TB</div>
@@ -45,33 +47,41 @@
       </div>
     </section>
 
-    <!-- Vue Planning -->
+    <!-- Planning -->
     <section id="view-planning" class="view">
       <div class="week-nav">
         <button id="prev-week" class="nav-btn">&#8249;</button>
         <span id="week-label" class="week-label"></span>
         <button id="next-week" class="nav-btn">&#8250;</button>
       </div>
-      <div id="week-grid"></div>
+      <div id="day-selector" class="day-selector"></div>
+      <div id="day-view" class="day-view">
+        <p class="select-day-hint">Sélectionnez un jour</p>
+      </div>
     </section>
 
-    <!-- Vue Prestations -->
+    <!-- Prestations -->
     <section id="view-prestations" class="view">
+      <div class="cat-bar-wrap">
+        <div id="cat-bar" class="cat-bar"></div>
+        <button id="manage-cats-btn" class="manage-cats-btn" title="Gérer les catégories">&#9881;</button>
+      </div>
       <div id="prestations-list"></div>
     </section>
 
-    <!-- Vue Clientes -->
+    <!-- Clientes -->
     <section id="view-clientes" class="view">
       <div class="search-bar">
         <input type="search" id="search-clientes" placeholder="&#128269; Rechercher une cliente…" autocomplete="off">
       </div>
       <div id="clientes-list"></div>
+      <button id="export-btn" class="export-btn">&#128229; Exporter tout l'historique (CSV)</button>
     </section>
 
-    <!-- Vue Historique (sous-vue de Clientes) -->
+    <!-- Historique -->
     <section id="view-historique" class="view">
       <div class="info-card" id="historique-info"></div>
-      <h2 class="section-title padded">Historique des rendez-vous</h2>
+      <h2 class="section-title">Historique des rendez-vous</h2>
       <div id="historique-list"></div>
     </section>
 
@@ -97,7 +107,7 @@
     </button>
   </nav>
 
-</div><!-- #app -->
+</div>
 
 <!-- MODAL -->
 <div id="modal-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true">

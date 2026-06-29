@@ -1,29 +1,35 @@
 /* ============================================================
    CONFIGURATION SUPABASE
-   Remplacez les deux valeurs ci-dessous par vos identifiants
    ============================================================ */
-const SUPABASE_URL     = 'https://lgfrabkcrrjkswnientb.supabase.co';
+const SUPABASE_URL      = 'https://lgfrabkcrrjkswnientb.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_rZYRn6Wls3IGeahh9oAs8Q_XlA4ZIJG';
 
 /* ============================================================
-   CONSTANTES
+   CONSTANTES — Semaine algérienne : Samedi → Vendredi
    ============================================================ */
-const CRENEAUX = ['09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00'];
-const JOURS    = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+const JOURS       = ['Samedi','Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi'];
+const JOURS_COURT = ['Sam','Dim','Lun','Mar','Mer','Jeu','Ven'];
 
 /* ============================================================
    STATE
    ============================================================ */
 const state = {
-  view:          'accueil',
-  weekStart:     null,
-  prestations:   [],
-  clientes:      [],
-  histCliente:   null,
+  view:         'accueil',
+  weekStart:    null,   // Date objet — samedi de la semaine affichée
+  selectedDay:  null,   // ISO string du jour sélectionné
+  selectedCat:  null,   // nom de la catégorie sélectionnée
+  prestations:  [],
+  clientes:     [],
+  categories:   [],
+  histCliente:  null,
+  // RDV modal multi-select
+  selPrestIds:  [],     // [{id, nom, prix}]
+  selClienteId: null,
+  selClienteNom: '',
 };
 
 /* ============================================================
-   CLIENT SUPABASE
+   SUPABASE
    ============================================================ */
 let db;
 function initSupabase() {
@@ -31,7 +37,7 @@ function initSupabase() {
 }
 
 /* ============================================================
-   UTILITAIRES DATE
+   DATES
    ============================================================ */
 function toISO(d) {
   const y = d.getFullYear();
@@ -40,11 +46,12 @@ function toISO(d) {
   return `${y}-${m}-${j}`;
 }
 
-function getMonday(d) {
+// Retourne le samedi de la semaine contenant d
+function getSaturday(d) {
   const dt = new Date(d);
   dt.setHours(0, 0, 0, 0);
-  const day = dt.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
+  const day = dt.getDay(); // 0=Dim, 1=Lun … 6=Sam
+  const diff = day === 6 ? 0 : -(day + 1);
   dt.setDate(dt.getDate() + diff);
   return dt;
 }
@@ -63,8 +70,8 @@ function fmtFull(d) {
   return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-function fmtDayDate(d) {
-  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+function fmtDayFull(d) {
+  return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
 /* ============================================================
@@ -97,7 +104,7 @@ function navigateTo(viewName, skipTab = false) {
   state.view = viewName;
 
   const titles = { accueil: 'TinaBeauty', planning: 'Planning', prestations: 'Prestations', clientes: 'Clientes' };
-  const backBtn     = document.getElementById('back-btn');
+  const backBtn      = document.getElementById('back-btn');
   const headerAction = document.getElementById('header-action');
 
   if (viewName === 'historique') {
@@ -110,41 +117,51 @@ function navigateTo(viewName, skipTab = false) {
   } else {
     document.getElementById('view-title').textContent = titles[viewName] || 'TinaBeauty';
     backBtn.classList.add('hidden');
-    if (viewName === 'prestations' || viewName === 'clientes') {
+    if (viewName === 'prestations') {
       headerAction.textContent = '+';
       headerAction.classList.remove('hidden');
-      headerAction.onclick = viewName === 'prestations' ? () => openModalPrestation() : () => openModalCliente();
+      headerAction.onclick = () => openModalPrestation();
+    } else if (viewName === 'clientes') {
+      headerAction.textContent = '+';
+      headerAction.classList.remove('hidden');
+      headerAction.onclick = () => openModalCliente();
     } else {
       headerAction.classList.add('hidden');
     }
   }
 
-  if (viewName === 'accueil')      renderAccueil();
-  else if (viewName === 'planning')     renderPlanning();
-  else if (viewName === 'prestations')  renderPrestations();
-  else if (viewName === 'clientes')     renderClientes();
+  if (viewName === 'accueil')     renderAccueil();
+  else if (viewName === 'planning')    renderPlanning();
+  else if (viewName === 'prestations') renderPrestations();
+  else if (viewName === 'clientes')    renderClientes();
 }
 
 /* ============================================================
-   DATA — LOADERS
+   DATA LOADERS
    ============================================================ */
 async function loadPrestations() {
-  const { data, error } = await db.from('prestations').select('*').order('categorie').order('nom');
-  if (error) { console.error('prestations:', error); return; }
+  const { data, error } = await db.from('prestations').select('*').order('nom');
+  if (error) { console.error(error); return; }
   state.prestations = data || [];
 }
 
 async function loadClientes() {
   const { data, error } = await db.from('clientes').select('*').order('nom').order('prenom');
-  if (error) { console.error('clientes:', error); return; }
+  if (error) { console.error(error); return; }
   state.clientes = data || [];
+}
+
+async function loadCategories() {
+  const { data, error } = await db.from('categories').select('*').order('nom');
+  if (error) { console.error(error); return; }
+  state.categories = data || [];
 }
 
 async function loadRdvRange(from, to) {
   const { data, error } = await db
     .from('rendezvous')
     .select(`
-      id, date, creneau,
+      id, date, creneau, statut,
       clientes ( id, nom, prenom ),
       rendezvous_prestations (
         prestation_id,
@@ -155,7 +172,7 @@ async function loadRdvRange(from, to) {
     .lte('date', to)
     .order('date')
     .order('creneau');
-  if (error) { console.error('rendezvous:', error); return []; }
+  if (error) { console.error(error); return []; }
   return data || [];
 }
 
@@ -163,7 +180,7 @@ async function loadRdvRange(from, to) {
    VUE ACCUEIL
    ============================================================ */
 async function renderAccueil() {
-  const today = new Date(); today.setHours(0,0,0,0);
+  const today    = new Date(); today.setHours(0, 0, 0, 0);
   const tomorrow = addDays(today, 1);
   const todayStr    = toISO(today);
   const tomorrowStr = toISO(tomorrow);
@@ -173,99 +190,149 @@ async function renderAccueil() {
 
   const rdvs = await loadRdvRange(todayStr, tomorrowStr);
 
-  fillRdvList('rdv-today',    rdvs.filter(r => r.date === todayStr));
-  fillRdvList('rdv-tomorrow', rdvs.filter(r => r.date === tomorrowStr));
+  fillAccueilList('rdv-today',    rdvs.filter(r => r.date === todayStr),    true);
+  fillAccueilList('rdv-tomorrow', rdvs.filter(r => r.date === tomorrowStr), false);
 }
 
-function fillRdvList(containerId, rdvs) {
+function fillAccueilList(containerId, rdvs, showStatus) {
   const el = document.getElementById(containerId);
   if (!rdvs.length) {
     el.innerHTML = '<p class="rdv-empty">Aucun rendez-vous</p>';
     return;
   }
   el.innerHTML = rdvs.map(r => {
-    const c     = r.clientes;
+    const c      = r.clientes;
     const prests = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
-    return `
-      <div class="rdv-card">
+    const statut = r.statut || 'en_attente';
+
+    let statusHtml = '';
+    if (showStatus) {
+      if (statut === 'en_attente') {
+        statusHtml = `<div class="rdv-status-row">
+          <button class="status-btn presente" data-id="${r.id}" data-s="presente">✓ Présente</button>
+          <button class="status-btn absente"  data-id="${r.id}" data-s="absente">✗ Absente</button>
+        </div>`;
+      } else {
+        const label = statut === 'presente' ? '✓ Présente' : '✗ Absente';
+        statusHtml = `<div class="status-badge ${statut}">${label}</div>`;
+      }
+    }
+
+    return `<div class="rdv-card">
+      <div class="rdv-card-top">
         <div class="rdv-time">${r.creneau}</div>
         <div class="rdv-info">
           <div class="rdv-client">${c ? c.prenom + ' ' + c.nom : '—'}</div>
           <div class="rdv-prests">${prests.join(' · ') || 'Aucune prestation'}</div>
         </div>
-      </div>`;
+      </div>
+      ${statusHtml}
+    </div>`;
   }).join('');
+
+  // Boutons de statut
+  el.querySelectorAll('.status-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await updateStatut(btn.dataset.id, btn.dataset.s);
+      renderAccueil();
+    });
+  });
+}
+
+async function updateStatut(rdvId, statut) {
+  const { error } = await db.from('rendezvous').update({ statut }).eq('id', rdvId);
+  if (error) { toast('Erreur : ' + error.message); return; }
+  toast(statut === 'presente' ? 'Marquée présente ✓' : 'Marquée absente ✗');
 }
 
 /* ============================================================
-   VUE PLANNING
+   VUE PLANNING — Niveau 1 : sélection du jour
    ============================================================ */
 async function renderPlanning() {
-  if (!state.weekStart) state.weekStart = getMonday(new Date());
+  if (!state.weekStart) state.weekStart = getSaturday(new Date());
 
-  const ws  = state.weekStart;
-  const we  = addDays(ws, 6);
+  const ws = state.weekStart;
+  const we = addDays(ws, 6);
   document.getElementById('week-label').textContent = `${fmtShort(ws)} – ${fmtShort(we)}`;
 
-  document.getElementById('week-grid').innerHTML = '<div class="loader">Chargement…</div>';
-
+  // Charger tous les RDV de la semaine pour les comptages
   const rdvs = await loadRdvRange(toISO(ws), toISO(we));
 
-  // Index rdvs by date_creneau
-  const rdvMap = {};
-  rdvs.forEach(r => { rdvMap[`${r.date}_${r.creneau}`] = r; });
+  const countMap = {};
+  rdvs.forEach(r => { countMap[r.date] = (countMap[r.date] || 0) + 1; });
 
   const todayStr = toISO(new Date());
-  let html = '';
+  const sel = document.getElementById('day-selector');
 
-  for (let i = 0; i < 7; i++) {
+  sel.innerHTML = JOURS_COURT.map((jr, i) => {
     const day    = addDays(ws, i);
     const dayStr = toISO(day);
-    const isToday = dayStr === todayStr;
+    const count  = countMap[dayStr] || 0;
+    const isToday  = dayStr === todayStr;
+    const isActive = dayStr === state.selectedDay;
+    const hasRdv   = count > 0;
 
-    html += `<div class="day-block ${isToday ? 'day-today' : ''}">
-      <div class="day-header">
-        <span class="day-name">${JOURS[i]}</span>
-        <span class="day-date">${fmtDayDate(day)}</span>
-      </div>
-      <div class="slot-list">`;
+    return `<div class="day-chip ${isToday ? 'today' : ''} ${isActive ? 'active' : ''} ${hasRdv ? 'has-rdv' : ''}"
+              data-date="${dayStr}">
+      <span class="day-chip-name">${jr}</span>
+      <span class="day-chip-num">${day.getDate()}</span>
+      <span class="day-chip-dot"></span>
+    </div>`;
+  }).join('');
 
-    CRENEAUX.forEach(cr => {
-      const rdv = rdvMap[`${dayStr}_${cr}`];
-      if (rdv) {
-        const c     = rdv.clientes;
-        const prests = (rdv.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
-        const tags   = prests.map(p => `<span class="ptag">${p}</span>`).join('');
-        html += `
-          <div class="slot-item slot-booked"
-               data-rdv="${rdv.id}" data-date="${dayStr}" data-cr="${cr}">
-            <span class="slot-time">${cr}</span>
-            <div class="slot-content">
-              <div class="slot-client-name">${c ? c.prenom + ' ' + c.nom : '—'}</div>
-              <div class="slot-tags">${tags}</div>
-            </div>
-            <span class="slot-icon">✏️</span>
-          </div>`;
-      } else {
-        html += `
-          <div class="slot-item slot-free"
-               data-date="${dayStr}" data-cr="${cr}">
-            <span class="slot-time">${cr}</span>
-            <div class="slot-content"><span class="slot-empty">Disponible</span></div>
-            <span class="slot-icon">+</span>
-          </div>`;
-      }
+  sel.querySelectorAll('.day-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      state.selectedDay = chip.dataset.date;
+      renderPlanning(); // re-render chips + day view
     });
+  });
 
-    html += `</div></div>`;
+  // Afficher la vue du jour sélectionné
+  if (state.selectedDay) {
+    const dayRdvs = rdvs
+      .filter(r => r.date === state.selectedDay)
+      .sort((a, b) => a.creneau.localeCompare(b.creneau));
+    renderDayView(state.selectedDay, dayRdvs);
+  } else {
+    document.getElementById('day-view').innerHTML = '<p class="select-day-hint">Sélectionnez un jour</p>';
+  }
+}
+
+/* Niveau 2 : rendez-vous du jour */
+function renderDayView(dateStr, rdvs) {
+  const dateObj = new Date(dateStr + 'T12:00:00');
+  const dv = document.getElementById('day-view');
+
+  let html = `<div class="day-view-header">
+    <span class="day-view-title">${fmtDayFull(dateObj)}</span>
+    <button class="add-rdv-btn" id="add-rdv-day">+ RDV</button>
+  </div>`;
+
+  if (!rdvs.length) {
+    html += '<div class="day-empty">Aucun rendez-vous ce jour.</div>';
+  } else {
+    html += rdvs.map(r => {
+      const c      = r.clientes;
+      const prests = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
+      return `<div class="day-rdv-card" data-rdv="${r.id}" data-date="${r.date}" data-cr="${r.creneau}">
+        <span class="day-rdv-time">${r.creneau}</span>
+        <div class="day-rdv-info">
+          <div class="day-rdv-client">${c ? c.prenom + ' ' + c.nom : '—'}</div>
+          <div class="day-rdv-prests">${prests.join(' · ') || 'Aucune prestation'}</div>
+        </div>
+        <span class="day-rdv-edit">✏️</span>
+      </div>`;
+    }).join('');
   }
 
-  const grid = document.getElementById('week-grid');
-  grid.innerHTML = html;
+  dv.innerHTML = html;
 
-  grid.querySelectorAll('.slot-item').forEach(el => {
-    el.addEventListener('click', () => {
-      openModalRdv(el.dataset.date, el.dataset.cr, el.dataset.rdv || null);
+  document.getElementById('add-rdv-day')?.addEventListener('click', () => {
+    openModalRdv(dateStr, null, null);
+  });
+  dv.querySelectorAll('.day-rdv-card').forEach(card => {
+    card.addEventListener('click', () => {
+      openModalRdv(card.dataset.date, card.dataset.cr, card.dataset.rdv);
     });
   });
 }
@@ -274,30 +341,47 @@ async function renderPlanning() {
    VUE PRESTATIONS
    ============================================================ */
 async function renderPrestations() {
-  await loadPrestations();
-  const container = document.getElementById('prestations-list');
+  await Promise.all([loadCategories(), loadPrestations()]);
 
-  if (!state.prestations.length) {
-    container.innerHTML = `<div class="empty-state"><div class="emo">✨</div><p>Aucune prestation enregistrée.<br>Appuyez sur <strong>+</strong> pour en ajouter.</p></div>`;
+  // Category bar
+  const catBar = document.getElementById('cat-bar');
+  if (!state.categories.length) {
+    catBar.innerHTML = '<span style="font-size:13px;color:var(--text-muted)">Aucune catégorie</span>';
+  } else {
+    if (!state.selectedCat || !state.categories.find(c => c.nom === state.selectedCat)) {
+      state.selectedCat = state.categories[0]?.nom || null;
+    }
+    catBar.innerHTML = state.categories.map(c => `
+      <div class="cat-chip ${c.nom === state.selectedCat ? 'active' : ''}" data-nom="${c.nom}">
+        ${c.nom}
+      </div>`).join('');
+    catBar.querySelectorAll('.cat-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        state.selectedCat = chip.dataset.nom;
+        renderPrestations();
+      });
+    });
+  }
+
+  // Liste des prestations
+  const container = document.getElementById('prestations-list');
+  const items = state.prestations.filter(p => p.categorie === state.selectedCat);
+
+  if (!state.selectedCat) {
+    container.innerHTML = `<div class="empty-state"><div class="emo">✨</div><p>Ajoutez d'abord une catégorie<br>en appuyant sur ⚙</p></div>`;
+    return;
+  }
+  if (!items.length) {
+    container.innerHTML = `<div class="empty-state"><div class="emo">✨</div><p>Aucune prestation dans <strong>${state.selectedCat}</strong>.<br>Appuyez sur <strong>+</strong> pour en ajouter.</p></div>`;
     return;
   }
 
-  const cats = ['Onglerie', 'Esthétique'];
-  let html = '';
-  cats.forEach(cat => {
-    const items = state.prestations.filter(p => p.categorie === cat);
-    if (!items.length) return;
-    html += `<div class="cat-group"><div class="cat-title">${cat}</div>`;
-    items.forEach(p => {
-      html += `<div class="prest-card" data-id="${p.id}">
-        <span class="prest-name">${p.nom}</span>
-        <span class="prest-price">${Number(p.prix).toLocaleString('fr-DZ')} DA</span>
-      </div>`;
-    });
-    html += `</div>`;
-  });
+  container.innerHTML = items.map(p => `
+    <div class="prest-card" data-id="${p.id}">
+      <span class="prest-name">${p.nom}</span>
+      <span class="prest-price">${Number(p.prix).toLocaleString('fr-DZ')} DA</span>
+    </div>`).join('');
 
-  container.innerHTML = html;
   container.querySelectorAll('.prest-card').forEach(card => {
     card.addEventListener('click', () => {
       const p = state.prestations.find(x => x.id === card.dataset.id);
@@ -312,8 +396,8 @@ async function renderPrestations() {
 async function renderClientes(filter = '') {
   await loadClientes();
   const container = document.getElementById('clientes-list');
-
   let list = state.clientes;
+
   if (filter) {
     const f = filter.toLowerCase();
     list = list.filter(c =>
@@ -324,7 +408,7 @@ async function renderClientes(filter = '') {
   }
 
   if (!list.length) {
-    container.innerHTML = `<div class="empty-state"><div class="emo">👩</div><p>${filter ? 'Aucun résultat.' : 'Aucune cliente enregistrée.<br>Appuyez sur <strong>+</strong> pour en ajouter.'}</p></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="emo">👩</div><p>${filter ? 'Aucun résultat.' : 'Aucune cliente.<br>Appuyez sur <strong>+</strong> pour en ajouter.'}</p></div>`;
     return;
   }
 
@@ -347,21 +431,65 @@ async function renderClientes(filter = '') {
 }
 
 /* ============================================================
-   VUE HISTORIQUE
+   EXPORT CSV
+   ============================================================ */
+async function exportCSV() {
+  toast('Génération du fichier…');
+
+  const { data, error } = await db
+    .from('rendezvous')
+    .select(`
+      id, date, creneau, statut,
+      clientes ( nom, prenom, telephone ),
+      rendezvous_prestations (
+        prestations ( nom, prix )
+      )
+    `)
+    .order('date', { ascending: false })
+    .order('creneau');
+
+  if (error || !data) { toast('Erreur d\'export'); return; }
+
+  const lines = [
+    ['Prénom', 'Nom', 'Téléphone', 'Date', 'Heure', 'Prestations', 'Total (DA)', 'Statut'].join(';')
+  ];
+
+  data.forEach(r => {
+    const c      = r.clientes || {};
+    const prests = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
+    const total  = (r.rendezvous_prestations || []).reduce((s, rp) => s + (rp.prestations?.prix || 0), 0);
+    const statut = { en_attente: 'En attente', presente: 'Présente', absente: 'Absente' }[r.statut] || r.statut;
+    lines.push([
+      c.prenom || '', c.nom || '', c.telephone || '',
+      r.date, r.creneau,
+      `"${prests.join(', ')}"`,
+      total, statut
+    ].join(';'));
+  });
+
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `tinabeauty_historique_${toISO(new Date())}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Export réussi ✓');
+}
+
+/* ============================================================
+   HISTORIQUE
    ============================================================ */
 async function openHistorique(cliente) {
   state.histCliente = cliente;
   navigateTo('historique', true);
 
-  // Info card
   const initials = cliente.prenom[0].toUpperCase() + cliente.nom[0].toUpperCase();
   document.getElementById('historique-info').innerHTML = `
     <div class="info-av">${initials}</div>
     <div class="info-details">
-      <p>
-        <strong>${cliente.prenom} ${cliente.nom}</strong><br>
-        📞 ${cliente.telephone || 'Non renseigné'}
-      </p>
+      <p><strong>${cliente.prenom} ${cliente.nom}</strong><br>
+      📞 ${cliente.telephone || 'Non renseigné'}</p>
     </div>`;
 
   const listEl = document.getElementById('historique-list');
@@ -370,19 +498,13 @@ async function openHistorique(cliente) {
   const today = toISO(new Date());
   const { data, error } = await db
     .from('rendezvous')
-    .select(`
-      id, date, creneau,
-      rendezvous_prestations (
-        prestations ( id, nom, prix )
-      )
-    `)
+    .select(`id, date, creneau, statut,
+      rendezvous_prestations ( prestations ( id, nom, prix ) )`)
     .eq('cliente_id', cliente.id)
     .lte('date', today)
-    .order('date', { ascending: false })
-    .order('creneau', { ascending: false });
+    .order('date', { ascending: false });
 
-  if (error) { listEl.innerHTML = '<p class="rdv-empty">Erreur de chargement.</p>'; return; }
-  if (!data || !data.length) {
+  if (error || !data || !data.length) {
     listEl.innerHTML = '<p class="rdv-empty">Aucun historique pour cette cliente.</p>';
     return;
   }
@@ -391,22 +513,30 @@ async function openHistorique(cliente) {
     const prests = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
     const total  = (r.rendezvous_prestations || []).reduce((s, rp) => s + (rp.prestations?.prix || 0), 0);
     const dateObj = new Date(r.date + 'T12:00:00');
+    const statutLabel = { en_attente: '', presente: '✓ Présente', absente: '✗ Absente' }[r.statut] || '';
+    const statutClass = r.statut !== 'en_attente' ? r.statut : '';
     return `<div class="histo-card">
       <div class="histo-date">${fmtFull(dateObj)} à ${r.creneau}</div>
       <div class="histo-prests">${prests.join(', ') || 'Aucune prestation'}</div>
       ${total > 0 ? `<div class="histo-total">${Number(total).toLocaleString('fr-DZ')} DA</div>` : ''}
+      ${statutLabel ? `<div class="histo-statut ${statutClass}">${statutLabel}</div>` : ''}
     </div>`;
   }).join('');
 }
 
 /* ============================================================
    MODAL — RENDEZ-VOUS
+   Avec recherche cliente + multi-select prestation par tags
    ============================================================ */
 async function openModalRdv(date, creneau, rdvId) {
   await Promise.all([loadPrestations(), loadClientes()]);
 
-  let existing = null;
-  let selPrests = [];
+  // Reset sélections
+  state.selPrestIds   = [];
+  state.selClienteId  = null;
+  state.selClienteNom = '';
+
+  let rdvStatut = 'en_attente';
 
   if (rdvId) {
     const { data } = await db
@@ -414,135 +544,222 @@ async function openModalRdv(date, creneau, rdvId) {
       .select('*, rendezvous_prestations(prestation_id)')
       .eq('id', rdvId)
       .single();
-    existing = data;
-    selPrests = (data?.rendezvous_prestations || []).map(rp => rp.prestation_id);
+    if (data) {
+      state.selClienteId = data.cliente_id;
+      rdvStatut = data.statut || 'en_attente';
+      const cli = state.clientes.find(c => c.id === data.cliente_id);
+      if (cli) state.selClienteNom = `${cli.prenom} ${cli.nom}`;
+
+      state.selPrestIds = (data.rendezvous_prestations || [])
+        .map(rp => {
+          const p = state.prestations.find(x => x.id === rp.prestation_id);
+          return p ? { id: p.id, nom: p.nom, prix: p.prix } : null;
+        }).filter(Boolean);
+    }
   }
 
   document.getElementById('modal-title').textContent = rdvId ? 'Modifier le rendez-vous' : 'Nouveau rendez-vous';
 
-  // Build client options
-  const clientOpts = state.clientes.map(c =>
-    `<option value="${c.id}" ${existing?.cliente_id === c.id ? 'selected' : ''}>${c.prenom} ${c.nom}</option>`
-  ).join('');
-
-  // Build creneau options
-  const crOpts = CRENEAUX.map(cr =>
-    `<option value="${cr}" ${cr === creneau ? 'selected' : ''}>${cr}</option>`
-  ).join('');
-
-  // Build prestations checkboxes
-  const cats = ['Onglerie', 'Esthétique'];
-  let checksHtml = '';
-  cats.forEach(cat => {
-    const items = state.prestations.filter(p => p.categorie === cat);
-    if (!items.length) return;
-    checksHtml += `<div class="check-category">${cat}</div>`;
-    items.forEach(p => {
-      const chk = selPrests.includes(p.id) ? 'checked' : '';
-      checksHtml += `
-        <label class="check-item">
-          <input type="checkbox" class="pchk" value="${p.id}" ${chk}>
-          <span class="check-lbl">${p.nom}</span>
-          <span class="check-price">${Number(p.prix).toLocaleString('fr-DZ')} DA</span>
-        </label>`;
-    });
-  });
-
   document.getElementById('modal-body').innerHTML = `
     <div class="form-group">
       <label>Date</label>
-      <input type="date" id="f-date" value="${date}">
+      <input type="date" id="f-date" value="${date || toISO(new Date())}">
     </div>
     <div class="form-group">
-      <label>Créneau</label>
-      <select id="f-cr">${crOpts}</select>
+      <label>Heure</label>
+      <input type="time" id="f-heure" value="${creneau || ''}">
     </div>
+
+    <!-- Recherche cliente -->
     <div class="form-group">
       <label>Cliente</label>
-      <select id="f-cliente">
-        <option value="">— Choisir une cliente —</option>
-        ${clientOpts}
-      </select>
+      <div class="search-select">
+        <div id="sel-cliente-badge" class="selected-badge ${state.selClienteId ? '' : 'hidden'}">
+          <span class="selected-badge-name" id="sel-cliente-nom">${state.selClienteNom}</span>
+          <button type="button" class="selected-badge-clear" id="clear-cliente">×</button>
+        </div>
+        <div class="ss-input-wrap ${state.selClienteId ? 'hidden' : ''}" id="cliente-input-wrap">
+          <input type="text" id="cliente-search" placeholder="Rechercher…" autocomplete="off">
+          <div id="cliente-results" class="search-results hidden"></div>
+        </div>
+      </div>
     </div>
+
+    <!-- Multi-select prestations -->
     <div class="form-group">
       <label>Prestations</label>
-      ${checksHtml || '<p style="color:var(--text-muted);font-size:14px">Aucune prestation enregistrée.</p>'}
+      <div id="prest-tags" class="tag-container"></div>
+      <div class="ss-input-wrap">
+        <input type="text" id="prest-search" placeholder="Rechercher et ajouter…" autocomplete="off">
+        <div id="prest-results" class="search-results hidden"></div>
+      </div>
     </div>`;
 
+  // Afficher les tags prestations déjà sélectionnées
+  refreshPrestTags();
+
+  // ---- Recherche cliente ----
+  const clienteInput   = document.getElementById('cliente-search');
+  const clienteResults = document.getElementById('cliente-results');
+  const clienteBadge   = document.getElementById('sel-cliente-badge');
+  const clienteWrap    = document.getElementById('cliente-input-wrap');
+
+  clienteInput.addEventListener('input', () => {
+    const q = clienteInput.value.toLowerCase().trim();
+    const matches = state.clientes.filter(c =>
+      `${c.prenom} ${c.nom}`.toLowerCase().includes(q) ||
+      (c.telephone || '').includes(q)
+    ).slice(0, 8);
+
+    if (!q) { clienteResults.classList.add('hidden'); return; }
+
+    clienteResults.classList.remove('hidden');
+    clienteResults.innerHTML = matches.length
+      ? matches.map(c => `<div class="sr-item" data-id="${c.id}" data-nom="${c.prenom} ${c.nom}">${c.prenom} ${c.nom} <small style="color:#aaa">${c.telephone || ''}</small></div>`).join('')
+      : '<div class="sr-empty">Aucune cliente trouvée</div>';
+
+    clienteResults.querySelectorAll('.sr-item').forEach(item => {
+      item.addEventListener('click', () => {
+        state.selClienteId  = item.dataset.id;
+        state.selClienteNom = item.dataset.nom;
+        document.getElementById('sel-cliente-nom').textContent = item.dataset.nom;
+        clienteBadge.classList.remove('hidden');
+        clienteWrap.classList.add('hidden');
+        clienteResults.classList.add('hidden');
+        clienteInput.value = '';
+      });
+    });
+  });
+
+  document.getElementById('clear-cliente').addEventListener('click', () => {
+    state.selClienteId  = null;
+    state.selClienteNom = '';
+    clienteBadge.classList.add('hidden');
+    clienteWrap.classList.remove('hidden');
+  });
+
+  // ---- Recherche prestations ----
+  const prestInput   = document.getElementById('prest-search');
+  const prestResults = document.getElementById('prest-results');
+
+  prestInput.addEventListener('input', () => {
+    const q = prestInput.value.toLowerCase().trim();
+    const alreadySel = state.selPrestIds.map(p => p.id);
+    const matches = state.prestations.filter(p =>
+      p.nom.toLowerCase().includes(q) && !alreadySel.includes(p.id)
+    ).slice(0, 8);
+
+    if (!q) { prestResults.classList.add('hidden'); return; }
+
+    prestResults.classList.remove('hidden');
+    prestResults.innerHTML = matches.length
+      ? matches.map(p => `<div class="sr-item" data-id="${p.id}" data-nom="${p.nom}" data-prix="${p.prix}">
+          ${p.nom} <small style="color:#aaa">${Number(p.prix).toLocaleString('fr-DZ')} DA</small>
+        </div>`).join('')
+      : '<div class="sr-empty">Aucune prestation trouvée</div>';
+
+    prestResults.querySelectorAll('.sr-item').forEach(item => {
+      item.addEventListener('click', () => {
+        state.selPrestIds.push({ id: item.dataset.id, nom: item.dataset.nom, prix: parseFloat(item.dataset.prix) });
+        prestInput.value = '';
+        prestResults.classList.add('hidden');
+        refreshPrestTags();
+      });
+    });
+  });
+
+  // ---- Bouton supprimer ----
   const delBtn = document.getElementById('modal-delete');
   if (rdvId) {
     delBtn.classList.remove('hidden');
     delBtn.onclick = async () => {
       if (!confirm('Supprimer ce rendez-vous ?')) return;
       await db.from('rendezvous').delete().eq('id', rdvId);
-      closeModal(); toast('Rendez-vous supprimé'); renderPlanning();
+      closeModal(); toast('Rendez-vous supprimé');
+      state.selectedDay && renderPlanning();
     };
   } else {
     delBtn.classList.add('hidden');
   }
 
+  // ---- Enregistrer ----
   document.getElementById('modal-save').onclick = async () => {
-    const dateVal    = document.getElementById('f-date').value;
-    const crVal      = document.getElementById('f-cr').value;
-    const clienteId  = document.getElementById('f-cliente').value;
-    const prestIds   = [...document.querySelectorAll('.pchk:checked')].map(cb => cb.value);
+    const dateVal  = document.getElementById('f-date').value;
+    const heureVal = document.getElementById('f-heure').value;
 
-    if (!dateVal)    { toast('Veuillez choisir une date'); return; }
-    if (!clienteId)  { toast('Veuillez choisir une cliente'); return; }
+    if (!dateVal)             { toast('Veuillez choisir une date'); return; }
+    if (!heureVal)            { toast('Veuillez saisir l\'heure'); return; }
+    if (!state.selClienteId)  { toast('Veuillez choisir une cliente'); return; }
 
     if (rdvId) {
-      const { error } = await db.from('rendezvous')
-        .update({ date: dateVal, creneau: crVal, cliente_id: clienteId })
-        .eq('id', rdvId);
-      if (error) { toast('Erreur : ' + error.message); return; }
+      await db.from('rendezvous').update({
+        date: dateVal, creneau: heureVal, cliente_id: state.selClienteId
+      }).eq('id', rdvId);
 
       await db.from('rendezvous_prestations').delete().eq('rendezvous_id', rdvId);
-      if (prestIds.length) {
+      if (state.selPrestIds.length) {
         await db.from('rendezvous_prestations').insert(
-          prestIds.map(pid => ({ rendezvous_id: rdvId, prestation_id: pid }))
+          state.selPrestIds.map(p => ({ rendezvous_id: rdvId, prestation_id: p.id }))
         );
       }
       closeModal(); toast('Rendez-vous modifié'); renderPlanning();
     } else {
-      // Vérifier si le créneau est déjà pris
-      const { data: conflict } = await db
-        .from('rendezvous')
-        .select('id')
-        .eq('date', dateVal)
-        .eq('creneau', crVal)
-        .maybeSingle();
-
+      // Vérifier doublon
+      const { data: conflict } = await db.from('rendezvous')
+        .select('id').eq('date', dateVal).eq('creneau', heureVal).maybeSingle();
       if (conflict) { toast('Ce créneau est déjà pris'); return; }
 
-      const { data: newRdv, error } = await db
-        .from('rendezvous')
-        .insert({ date: dateVal, creneau: crVal, cliente_id: clienteId })
-        .select()
-        .single();
-
+      const { data: newRdv, error } = await db.from('rendezvous')
+        .insert({ date: dateVal, creneau: heureVal, cliente_id: state.selClienteId })
+        .select().single();
       if (error) { toast('Erreur : ' + error.message); return; }
 
-      if (newRdv && prestIds.length) {
+      if (newRdv && state.selPrestIds.length) {
         await db.from('rendezvous_prestations').insert(
-          prestIds.map(pid => ({ rendezvous_id: newRdv.id, prestation_id: pid }))
+          state.selPrestIds.map(p => ({ rendezvous_id: newRdv.id, prestation_id: p.id }))
         );
       }
-      closeModal(); toast('Rendez-vous ajouté'); renderPlanning();
+      closeModal(); toast('Rendez-vous ajouté');
+      // Sélectionner le jour et rafraîchir
+      state.selectedDay = dateVal;
+      renderPlanning();
     }
   };
 
   openModal();
 }
 
+function refreshPrestTags() {
+  const container = document.getElementById('prest-tags');
+  if (!container) return;
+  if (!state.selPrestIds.length) { container.innerHTML = ''; return; }
+  container.innerHTML = state.selPrestIds.map((p, i) => `
+    <span class="prest-tag">
+      ${p.nom}
+      <button type="button" class="tag-remove" data-i="${i}">×</button>
+    </span>`).join('');
+  container.querySelectorAll('.tag-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.selPrestIds.splice(parseInt(btn.dataset.i), 1);
+      refreshPrestTags();
+    });
+  });
+}
+
 /* ============================================================
    MODAL — PRESTATION
    ============================================================ */
-function openModalPrestation(prest = null) {
+async function openModalPrestation(prest = null) {
+  await loadCategories();
   document.getElementById('modal-title').textContent = prest ? 'Modifier la prestation' : 'Nouvelle prestation';
+
+  const catOptions = state.categories.map(c =>
+    `<option value="${c.nom}" ${prest?.categorie === c.nom ? 'selected' : ''}>${c.nom}</option>`
+  ).join('');
 
   document.getElementById('modal-body').innerHTML = `
     <div class="form-group">
-      <label>Nom de la prestation</label>
+      <label>Nom</label>
       <input type="text" id="f-pnom" placeholder="Ex : Pose gel couleur" value="${prest?.nom || ''}">
     </div>
     <div class="form-group">
@@ -552,10 +769,7 @@ function openModalPrestation(prest = null) {
     </div>
     <div class="form-group">
       <label>Catégorie</label>
-      <select id="f-pcat">
-        <option value="Onglerie"   ${prest?.categorie === 'Onglerie'   ? 'selected' : ''}>Onglerie</option>
-        <option value="Esthétique" ${prest?.categorie === 'Esthétique' ? 'selected' : ''}>Esthétique</option>
-      </select>
+      <select id="f-pcat">${catOptions || '<option>Aucune catégorie</option>'}</select>
     </div>`;
 
   const delBtn = document.getElementById('modal-delete');
@@ -571,25 +785,91 @@ function openModalPrestation(prest = null) {
   }
 
   document.getElementById('modal-save').onclick = async () => {
-    const nom      = document.getElementById('f-pnom').value.trim();
-    const prix     = parseFloat(document.getElementById('f-pprix').value);
+    const nom       = document.getElementById('f-pnom').value.trim();
+    const prix      = parseFloat(document.getElementById('f-pprix').value);
     const categorie = document.getElementById('f-pcat').value;
 
-    if (!nom)           { toast('Veuillez saisir un nom'); return; }
+    if (!nom)              { toast('Veuillez saisir un nom'); return; }
     if (isNaN(prix) || prix < 0) { toast('Veuillez saisir un prix valide'); return; }
+    if (!categorie)        { toast('Veuillez choisir une catégorie'); return; }
 
     if (prest) {
       const { error } = await db.from('prestations').update({ nom, prix, categorie }).eq('id', prest.id);
       if (error) { toast('Erreur : ' + error.message); return; }
-      closeModal(); toast('Prestation modifiée'); renderPrestations();
     } else {
       const { error } = await db.from('prestations').insert({ nom, prix, categorie });
       if (error) { toast('Erreur : ' + error.message); return; }
-      closeModal(); toast('Prestation ajoutée'); renderPrestations();
     }
+    closeModal(); toast(prest ? 'Prestation modifiée' : 'Prestation ajoutée'); renderPrestations();
   };
 
   openModal();
+}
+
+/* ============================================================
+   MODAL — GESTION DES CATÉGORIES
+   ============================================================ */
+async function openModalCategories() {
+  await loadCategories();
+  document.getElementById('modal-title').textContent = 'Gérer les catégories';
+  document.getElementById('modal-delete').classList.add('hidden');
+  document.getElementById('modal-save').style.display = 'none';
+
+  const renderCatList = () => {
+    const body = document.getElementById('modal-body');
+    body.innerHTML = `
+      <div class="cat-manage-list">
+        ${state.categories.map(c => `
+          <div class="cat-manage-item" data-id="${c.id}" data-nom="${c.nom}">
+            <span class="cat-manage-name">${c.nom}</span>
+            <button class="cat-manage-del" data-id="${c.id}" data-nom="${c.nom}">🗑</button>
+          </div>`).join('')}
+      </div>
+      <div class="cat-add-row">
+        <input type="text" id="new-cat-input" placeholder="Nouvelle catégorie…">
+        <button id="new-cat-btn">Ajouter</button>
+      </div>`;
+
+    // Supprimer catégorie
+    body.querySelectorAll('.cat-manage-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const nom = btn.dataset.nom;
+        const id  = btn.dataset.id;
+        // Vérifier si des prestations utilisent cette catégorie
+        const used = state.prestations.filter(p => p.categorie === nom);
+        if (used.length > 0) {
+          toast(`Impossible : ${used.length} prestation(s) utilisent cette catégorie`);
+          return;
+        }
+        if (!confirm(`Supprimer la catégorie "${nom}" ?`)) return;
+        await db.from('categories').delete().eq('id', id);
+        toast('Catégorie supprimée');
+        if (state.selectedCat === nom) state.selectedCat = null;
+        await loadCategories();
+        renderCatList();
+      });
+    });
+
+    // Ajouter catégorie
+    document.getElementById('new-cat-btn').addEventListener('click', async () => {
+      const nom = document.getElementById('new-cat-input').value.trim();
+      if (!nom) { toast('Saisissez un nom de catégorie'); return; }
+      if (state.categories.find(c => c.nom.toLowerCase() === nom.toLowerCase())) {
+        toast('Cette catégorie existe déjà'); return;
+      }
+      const { error } = await db.from('categories').insert({ nom });
+      if (error) { toast('Erreur : ' + error.message); return; }
+      toast('Catégorie ajoutée');
+      await loadCategories();
+      renderCatList();
+    });
+  };
+
+  renderCatList();
+  openModal();
+
+  // Remettre display du bouton save au cas où
+  document.getElementById('modal-save').style.display = '';
 }
 
 /* ============================================================
@@ -597,7 +877,6 @@ function openModalPrestation(prest = null) {
    ============================================================ */
 function openModalCliente(cliente = null) {
   document.getElementById('modal-title').textContent = cliente ? 'Modifier la cliente' : 'Nouvelle cliente';
-
   document.getElementById('modal-body').innerHTML = `
     <div class="form-group">
       <label>Prénom</label>
@@ -621,24 +900,18 @@ function openModalCliente(cliente = null) {
     const prenom    = document.getElementById('f-cprenom').value.trim();
     const nom       = document.getElementById('f-cnom').value.trim();
     const telephone = document.getElementById('f-ctel').value.trim();
-
     if (!prenom || !nom) { toast('Veuillez saisir le nom complet'); return; }
 
     if (cliente) {
       const { error } = await db.from('clientes').update({ prenom, nom, telephone }).eq('id', cliente.id);
       if (error) { toast('Erreur : ' + error.message); return; }
-
-      // Refresh state if in historique
       if (state.histCliente?.id === cliente.id) {
         state.histCliente = { ...cliente, prenom, nom, telephone };
         document.getElementById('view-title').textContent = `${prenom} ${nom}`;
         document.getElementById('historique-info').innerHTML = `
           <div class="info-av">${prenom[0].toUpperCase()}${nom[0].toUpperCase()}</div>
           <div class="info-details">
-            <p>
-              <strong>${prenom} ${nom}</strong><br>
-              📞 ${telephone || 'Non renseigné'}
-            </p>
+            <p><strong>${prenom} ${nom}</strong><br>📞 ${telephone || 'Non renseigné'}</p>
           </div>`;
       }
       closeModal(); toast('Cliente modifiée');
@@ -648,7 +921,6 @@ function openModalCliente(cliente = null) {
       closeModal(); toast('Cliente ajoutée'); renderClientes();
     }
   };
-
   openModal();
 }
 
@@ -657,11 +929,11 @@ function openModalCliente(cliente = null) {
    ============================================================ */
 function openModal() {
   document.getElementById('modal-overlay').classList.remove('hidden');
-  document.getElementById('modal-body').scrollTop = 0;
+  setTimeout(() => document.getElementById('modal-body').scrollTop = 0, 50);
 }
-
 function closeModal() {
   document.getElementById('modal-overlay').classList.add('hidden');
+  document.getElementById('modal-save').style.display = '';
 }
 
 /* ============================================================
@@ -670,41 +942,36 @@ function closeModal() {
 function init() {
   initSupabase();
 
-  // Tabs
   document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => navigateTo(tab.dataset.view));
   });
 
-  // Back button
-  document.getElementById('back-btn').addEventListener('click', () => {
-    navigateTo('clientes');
-  });
+  document.getElementById('back-btn').addEventListener('click', () => navigateTo('clientes'));
 
-  // Week navigation
   document.getElementById('prev-week').addEventListener('click', () => {
-    state.weekStart = addDays(state.weekStart || getMonday(new Date()), -7);
+    state.weekStart   = addDays(state.weekStart || getSaturday(new Date()), -7);
+    state.selectedDay = null;
     renderPlanning();
   });
   document.getElementById('next-week').addEventListener('click', () => {
-    state.weekStart = addDays(state.weekStart || getMonday(new Date()), 7);
+    state.weekStart   = addDays(state.weekStart || getSaturday(new Date()), 7);
+    state.selectedDay = null;
     renderPlanning();
   });
 
-  // Modal close
   document.getElementById('modal-close').addEventListener('click', closeModal);
   document.getElementById('modal-overlay').addEventListener('click', e => {
     if (e.target === document.getElementById('modal-overlay')) closeModal();
   });
 
-  // Search clientes
-  document.getElementById('search-clientes').addEventListener('input', e => {
-    renderClientes(e.target.value);
-  });
+  document.getElementById('search-clientes').addEventListener('input', e => renderClientes(e.target.value));
 
-  // Initial view
+  document.getElementById('manage-cats-btn').addEventListener('click', openModalCategories);
+
+  document.getElementById('export-btn').addEventListener('click', exportCSV);
+
   navigateTo('accueil');
 
-  // Service worker
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW:', err));
   }
