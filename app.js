@@ -207,10 +207,14 @@ function fillAccueilList(containerId, rdvs, showStatus) {
 
     let statusHtml = '';
     if (showStatus) {
-      statusHtml = `<div class="rdv-status-row">
-        <button class="status-btn presente ${statut === 'presente' ? 'active' : ''}" data-id="${r.id}" data-s="presente">✓ Présente</button>
-        <button class="status-btn absente  ${statut === 'absente'  ? 'active' : ''}" data-id="${r.id}" data-s="absente">✗ Absente</button>
-      </div>`;
+      if (statut === 'annule') {
+        statusHtml = `<div class="status-badge annule">🚫 Rendez-vous annulé</div>`;
+      } else {
+        statusHtml = `<div class="rdv-status-row">
+          <button class="status-btn presente ${statut === 'presente' ? 'active' : ''}" data-id="${r.id}" data-s="presente">✓ Présente</button>
+          <button class="status-btn absente  ${statut === 'absente'  ? 'active' : ''}" data-id="${r.id}" data-s="absente">✗ Absente</button>
+        </div>`;
+      }
     }
 
     return `<div class="rdv-card">
@@ -307,15 +311,16 @@ function renderDayView(dateStr, rdvs) {
     html += '<div class="day-empty">Aucun rendez-vous ce jour.</div>';
   } else {
     html += rdvs.map(r => {
-      const c      = r.clientes;
-      const prests = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
-      return `<div class="day-rdv-card" data-rdv="${r.id}" data-date="${r.date}" data-cr="${r.creneau}">
+      const c       = r.clientes;
+      const prests  = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
+      const annule  = r.statut === 'annule';
+      return `<div class="day-rdv-card ${annule ? 'annule' : ''}" data-rdv="${r.id}" data-date="${r.date}" data-cr="${r.creneau}">
         <span class="day-rdv-time">${r.creneau}</span>
         <div class="day-rdv-info">
           <div class="day-rdv-client">${c ? c.prenom + ' ' + c.nom : '—'}</div>
-          <div class="day-rdv-prests">${prests.join(' · ') || 'Aucune prestation'}</div>
+          <div class="day-rdv-prests">${annule ? '🚫 Annulé' : (prests.join(' · ') || 'Aucune prestation')}</div>
         </div>
-        <span class="day-rdv-edit">✏️</span>
+        <span class="day-rdv-edit">${annule ? '' : '✏️'}</span>
       </div>`;
     }).join('');
   }
@@ -453,7 +458,7 @@ async function exportCSV() {
     const c      = r.clientes || {};
     const prests = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
     const total  = (r.rendezvous_prestations || []).reduce((s, rp) => s + (rp.prestations?.prix || 0), 0);
-    const statut = { en_attente: 'En attente', presente: 'Présente', absente: 'Absente' }[r.statut] || r.statut;
+    const statut = { en_attente: 'En attente', presente: 'Présente', absente: 'Absente', annule: 'Annulé' }[r.statut] || r.statut;
     lines.push([
       c.prenom || '', c.nom || '', c.telephone || '',
       r.date, r.creneau,
@@ -516,10 +521,13 @@ async function openHistorique(cliente) {
       <div class="histo-date">${fmtFull(dateObj)} à ${r.creneau}</div>
       <div class="histo-prests">${prests.join(', ') || 'Aucune prestation'}</div>
       ${total > 0 ? `<div class="histo-total">${Number(total).toLocaleString('fr-DZ')} DA</div>` : ''}
-      <div class="histo-status-row">
-        <button class="histo-status-btn presente ${statut === 'presente' ? 'active' : ''}" data-id="${r.id}" data-s="presente">✓ Présente</button>
-        <button class="histo-status-btn absente  ${statut === 'absente'  ? 'active' : ''}" data-id="${r.id}" data-s="absente">✗ Absente</button>
-      </div>
+      ${statut === 'annule'
+        ? `<div class="status-badge annule" style="margin-top:8px">🚫 Annulé</div>`
+        : `<div class="histo-status-row">
+            <button class="histo-status-btn presente ${statut === 'presente' ? 'active' : ''}" data-id="${r.id}" data-s="presente">✓ Présente</button>
+            <button class="histo-status-btn absente  ${statut === 'absente'  ? 'active' : ''}" data-id="${r.id}" data-s="absente">✗ Absente</button>
+          </div>`
+      }
     </div>`;
   }).join('');
 
@@ -600,7 +608,8 @@ async function openModalRdv(date, creneau, rdvId) {
         <input type="text" id="prest-search" placeholder="Rechercher et ajouter…" autocomplete="off">
         <div id="prest-results" class="search-results hidden"></div>
       </div>
-    </div>`;
+    </div>
+    ${rdvId ? `<button type="button" id="annuler-rdv-btn" class="btn-annuler">❌ Annuler ce rendez-vous</button>` : ''}`;
 
   // Afficher les tags prestations déjà sélectionnées
   refreshPrestTags();
@@ -675,12 +684,19 @@ async function openModalRdv(date, creneau, rdvId) {
     });
   });
 
-  // ---- Bouton supprimer ----
+  // ---- Bouton annuler le RDV ----
+  document.getElementById('annuler-rdv-btn')?.addEventListener('click', async () => {
+    if (!confirm('Marquer ce rendez-vous comme annulé ?')) return;
+    await db.from('rendezvous').update({ statut: 'annule' }).eq('id', rdvId);
+    closeModal(); toast('Rendez-vous annulé'); renderPlanning();
+  });
+
+  // ---- Bouton supprimer définitivement ----
   const delBtn = document.getElementById('modal-delete');
   if (rdvId) {
     delBtn.classList.remove('hidden');
     delBtn.onclick = async () => {
-      if (!confirm('Supprimer ce rendez-vous ?')) return;
+      if (!confirm('Supprimer définitivement ce rendez-vous ?')) return;
       await db.from('rendezvous').delete().eq('id', rdvId);
       closeModal(); toast('Rendez-vous supprimé');
       state.selectedDay && renderPlanning();
@@ -906,7 +922,28 @@ function openModalCliente(cliente = null) {
              value="${cliente?.telephone2 || ''}">
     </div>`;
 
-  document.getElementById('modal-delete').classList.add('hidden');
+  const delClienteBtn = document.getElementById('modal-delete');
+  if (cliente) {
+    delClienteBtn.classList.remove('hidden');
+    delClienteBtn.onclick = async () => {
+      // Compter ses rendez-vous
+      const { count } = await db.from('rendezvous')
+        .select('id', { count: 'exact', head: true })
+        .eq('cliente_id', cliente.id);
+      const msg = count > 0
+        ? `Supprimer "${cliente.prenom} ${cliente.nom}" et ses ${count} rendez-vous ?`
+        : `Supprimer "${cliente.prenom} ${cliente.nom}" ?`;
+      if (!confirm(msg)) return;
+      await db.from('rendezvous').delete().eq('cliente_id', cliente.id);
+      await db.from('clientes').delete().eq('id', cliente.id);
+      closeModal();
+      toast('Cliente supprimée');
+      if (state.view === 'historique') navigateTo('clientes');
+      else renderClientes();
+    };
+  } else {
+    delClienteBtn.classList.add('hidden');
+  }
 
   document.getElementById('modal-save').onclick = async () => {
     const prenom     = document.getElementById('f-cprenom').value.trim();
