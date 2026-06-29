@@ -74,9 +74,15 @@
       <div class="search-bar">
         <input type="search" id="search-clientes" placeholder="&#128269; Rechercher une cliente…" autocomplete="off">
       </div>
+      <!-- Android : Contact Picker API -->
       <button id="import-contacts-btn" class="import-contacts-btn hidden">
         &#128241; Importer depuis mes contacts
       </button>
+      <!-- iOS : import fichier vCard -->
+      <label id="import-vcf-label" class="import-contacts-btn hidden">
+        &#128196; Importer un fichier vCard (.vcf)
+        <input type="file" id="import-vcf-input" accept=".vcf,text/vcard" style="display:none">
+      </label>
       <div id="clientes-list"></div>
       <button id="export-btn" class="export-btn">&#128229; Exporter tout l'historique (CSV)</button>
     </section>

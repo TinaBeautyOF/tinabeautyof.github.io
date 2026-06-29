@@ -431,44 +431,77 @@ async function renderClientes(filter = '') {
 }
 
 /* ============================================================
-   IMPORT CONTACTS TÉLÉPHONE
+   IMPORT CONTACTS — Android (Contact Picker) + iOS (vCard)
    ============================================================ */
+
+/* Parsing vCard (.vcf) */
+function parseVCard(text) {
+  const results = [];
+  const cards = text.split(/BEGIN:VCARD/i).slice(1);
+  for (const card of cards) {
+    let fullName = '', phone = '', phone2 = '';
+    for (const line of card.split(/\r?\n/)) {
+      // Nom complet (FN prioritaire sur N)
+      if (/^FN:/i.test(line)) {
+        fullName = line.replace(/^FN:/i, '').trim();
+      } else if (/^N:/i.test(line) && !fullName) {
+        const parts = line.replace(/^N:/i, '').split(';');
+        const last = parts[0]?.trim(), first = parts[1]?.trim();
+        fullName = first && last ? `${first} ${last}` : (first || last || '');
+      }
+      // Téléphone
+      if (/^TEL/i.test(line)) {
+        const tel = line.replace(/^TEL[^:]*:/i, '').trim();
+        if (tel) { if (!phone) phone = tel; else if (!phone2) phone2 = tel; }
+      }
+    }
+    if (fullName) results.push({ fullName, phone, phone2 });
+  }
+  return results;
+}
+
+async function processContactList(list) {
+  let added = 0, skipped = 0;
+  for (const { fullName, phone, phone2 } of list) {
+    const parts  = fullName.trim().split(/\s+/);
+    const prenom = parts[0];
+    const nom    = parts.length > 1 ? parts.slice(1).join(' ') : prenom;
+    const { data: dup } = await db.from('clientes')
+      .select('id').ilike('nom', nom).ilike('prenom', prenom).maybeSingle();
+    if (dup) { skipped++; continue; }
+    const { error } = await db.from('clientes')
+      .insert({ prenom, nom, telephone: phone, telephone2: phone2 || null });
+    if (!error) added++;
+  }
+  let msg = `${added} cliente(s) importée(s)`;
+  if (skipped) msg += `, ${skipped} déjà existante(s)`;
+  toast(msg);
+  if (added > 0) renderClientes();
+}
+
 async function importFromContacts() {
   try {
     const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
     if (!contacts.length) return;
-
-    let added = 0, skipped = 0, errors = 0;
-
-    for (const contact of contacts) {
-      const fullName  = (contact.name?.[0] || '').trim();
-      const telephone = (contact.tel?.[0] || '').trim();
-      if (!fullName) continue;
-
-      // Découper "Prénom Nom" — premier mot = prénom, reste = nom
-      const parts  = fullName.split(/\s+/);
-      const prenom = parts[0];
-      const nom    = parts.length > 1 ? parts.slice(1).join(' ') : prenom;
-
-      // Vérifier doublon
-      const { data: dup } = await db.from('clientes')
-        .select('id').ilike('nom', nom).ilike('prenom', prenom).maybeSingle();
-      if (dup) { skipped++; continue; }
-
-      const { error } = await db.from('clientes').insert({ prenom, nom, telephone });
-      if (error) errors++;
-      else added++;
-    }
-
-    let msg = `${added} cliente(s) importée(s)`;
-    if (skipped) msg += `, ${skipped} déjà existante(s)`;
-    if (errors)  msg += `, ${errors} erreur(s)`;
-    toast(msg);
-    if (added > 0) renderClientes();
-
+    const list = contacts.map(c => ({
+      fullName: (c.name?.[0] || '').trim(),
+      phone:    (c.tel?.[0]  || '').trim(),
+      phone2:   (c.tel?.[1]  || '').trim(),
+    })).filter(c => c.fullName);
+    await processContactList(list);
   } catch (err) {
     if (err.name !== 'AbortError') toast('Import annulé ou non autorisé');
   }
+}
+
+function importFromVCF(file) {
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const list = parseVCard(e.target.result);
+    if (!list.length) { toast('Aucun contact trouvé dans le fichier'); return; }
+    await processContactList(list);
+  };
+  reader.readAsText(file, 'UTF-8');
 }
 
 /* ============================================================
@@ -1062,11 +1095,18 @@ function init() {
 
   document.getElementById('search-clientes').addEventListener('input', e => renderClientes(e.target.value));
 
-  // Afficher le bouton d'import uniquement si l'API Contact Picker est disponible (iOS Safari 14.5+)
+  // Android : Contact Picker API
   if ('contacts' in navigator) {
     document.getElementById('import-contacts-btn').classList.remove('hidden');
+    document.getElementById('import-contacts-btn').addEventListener('click', importFromContacts);
+  } else {
+    // iOS et autres : import vCard
+    document.getElementById('import-vcf-label').classList.remove('hidden');
+    document.getElementById('import-vcf-input').addEventListener('change', e => {
+      if (e.target.files[0]) importFromVCF(e.target.files[0]);
+      e.target.value = ''; // reset pour permettre de réimporter
+    });
   }
-  document.getElementById('import-contacts-btn').addEventListener('click', importFromContacts);
 
   document.getElementById('manage-cats-btn').addEventListener('click', openModalCategories);
 
