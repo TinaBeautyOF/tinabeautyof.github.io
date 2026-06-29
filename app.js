@@ -207,15 +207,10 @@ function fillAccueilList(containerId, rdvs, showStatus) {
 
     let statusHtml = '';
     if (showStatus) {
-      if (statut === 'en_attente') {
-        statusHtml = `<div class="rdv-status-row">
-          <button class="status-btn presente" data-id="${r.id}" data-s="presente">✓ Présente</button>
-          <button class="status-btn absente"  data-id="${r.id}" data-s="absente">✗ Absente</button>
-        </div>`;
-      } else {
-        const label = statut === 'presente' ? '✓ Présente' : '✗ Absente';
-        statusHtml = `<div class="status-badge ${statut}">${label}</div>`;
-      }
+      statusHtml = `<div class="rdv-status-row">
+        <button class="status-btn presente ${statut === 'presente' ? 'active' : ''}" data-id="${r.id}" data-s="presente">✓ Présente</button>
+        <button class="status-btn absente  ${statut === 'absente'  ? 'active' : ''}" data-id="${r.id}" data-s="absente">✗ Absente</button>
+      </div>`;
     }
 
     return `<div class="rdv-card">
@@ -417,7 +412,7 @@ async function renderClientes(filter = '') {
       <div class="cliente-av">${c.prenom[0].toUpperCase()}${c.nom[0].toUpperCase()}</div>
       <div class="cliente-info">
         <div class="cliente-name">${c.prenom} ${c.nom}</div>
-        <div class="cliente-phone">${c.telephone || 'Pas de numéro'}</div>
+        <div class="cliente-phone">${c.telephone || 'Pas de numéro'}${c.telephone2 ? '<br>' + c.telephone2 : ''}</div>
       </div>
       <span class="cliente-arrow">›</span>
     </div>`).join('');
@@ -480,17 +475,20 @@ async function exportCSV() {
 /* ============================================================
    HISTORIQUE
    ============================================================ */
+function buildInfoCard(c) {
+  const initials = c.prenom[0].toUpperCase() + c.nom[0].toUpperCase();
+  const tel2 = c.telephone2 ? `<br>📞 ${c.telephone2}` : '';
+  return `<div class="info-av">${initials}</div>
+    <div class="info-details">
+      <p><strong>${c.prenom} ${c.nom}</strong><br>
+      📞 ${c.telephone || 'Non renseigné'}${tel2}</p>
+    </div>`;
+}
+
 async function openHistorique(cliente) {
   state.histCliente = cliente;
   navigateTo('historique', true);
-
-  const initials = cliente.prenom[0].toUpperCase() + cliente.nom[0].toUpperCase();
-  document.getElementById('historique-info').innerHTML = `
-    <div class="info-av">${initials}</div>
-    <div class="info-details">
-      <p><strong>${cliente.prenom} ${cliente.nom}</strong><br>
-      📞 ${cliente.telephone || 'Non renseigné'}</p>
-    </div>`;
+  document.getElementById('historique-info').innerHTML = buildInfoCard(cliente);
 
   const listEl = document.getElementById('historique-list');
   listEl.innerHTML = '<div class="loader">Chargement…</div>';
@@ -513,15 +511,24 @@ async function openHistorique(cliente) {
     const prests = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
     const total  = (r.rendezvous_prestations || []).reduce((s, rp) => s + (rp.prestations?.prix || 0), 0);
     const dateObj = new Date(r.date + 'T12:00:00');
-    const statutLabel = { en_attente: '', presente: '✓ Présente', absente: '✗ Absente' }[r.statut] || '';
-    const statutClass = r.statut !== 'en_attente' ? r.statut : '';
+    const statut  = r.statut || 'en_attente';
     return `<div class="histo-card">
       <div class="histo-date">${fmtFull(dateObj)} à ${r.creneau}</div>
       <div class="histo-prests">${prests.join(', ') || 'Aucune prestation'}</div>
       ${total > 0 ? `<div class="histo-total">${Number(total).toLocaleString('fr-DZ')} DA</div>` : ''}
-      ${statutLabel ? `<div class="histo-statut ${statutClass}">${statutLabel}</div>` : ''}
+      <div class="histo-status-row">
+        <button class="histo-status-btn presente ${statut === 'presente' ? 'active' : ''}" data-id="${r.id}" data-s="presente">✓ Présente</button>
+        <button class="histo-status-btn absente  ${statut === 'absente'  ? 'active' : ''}" data-id="${r.id}" data-s="absente">✗ Absente</button>
+      </div>
     </div>`;
   }).join('');
+
+  listEl.querySelectorAll('.histo-status-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await updateStatut(btn.dataset.id, btn.dataset.s);
+      openHistorique(state.histCliente);
+    });
+  });
 }
 
 /* ============================================================
@@ -889,17 +896,23 @@ function openModalCliente(cliente = null) {
              value="${cliente?.nom || ''}">
     </div>
     <div class="form-group">
-      <label>Téléphone</label>
+      <label>Téléphone 1</label>
       <input type="tel" id="f-ctel" placeholder="Ex : 0550 12 34 56" autocomplete="tel"
              value="${cliente?.telephone || ''}">
+    </div>
+    <div class="form-group">
+      <label>Téléphone 2 <span style="font-weight:400;text-transform:none;letter-spacing:0">(optionnel)</span></label>
+      <input type="tel" id="f-ctel2" placeholder="Ex : 0661 78 90 12"
+             value="${cliente?.telephone2 || ''}">
     </div>`;
 
   document.getElementById('modal-delete').classList.add('hidden');
 
   document.getElementById('modal-save').onclick = async () => {
-    const prenom    = document.getElementById('f-cprenom').value.trim();
-    const nom       = document.getElementById('f-cnom').value.trim();
-    const telephone = document.getElementById('f-ctel').value.trim();
+    const prenom     = document.getElementById('f-cprenom').value.trim();
+    const nom        = document.getElementById('f-cnom').value.trim();
+    const telephone  = document.getElementById('f-ctel').value.trim();
+    const telephone2 = document.getElementById('f-ctel2').value.trim();
     if (!prenom || !nom) { toast('Veuillez saisir le nom complet'); return; }
 
     if (cliente) {
@@ -908,16 +921,12 @@ function openModalCliente(cliente = null) {
         .neq('id', cliente.id).maybeSingle();
       if (dup) { toast(`"${prenom} ${nom}" existe déjà dans la liste`); return; }
 
-      const { error } = await db.from('clientes').update({ prenom, nom, telephone }).eq('id', cliente.id);
+      const { error } = await db.from('clientes').update({ prenom, nom, telephone, telephone2 }).eq('id', cliente.id);
       if (error) { toast('Erreur : ' + error.message); return; }
       if (state.histCliente?.id === cliente.id) {
-        state.histCliente = { ...cliente, prenom, nom, telephone };
+        state.histCliente = { ...cliente, prenom, nom, telephone, telephone2 };
         document.getElementById('view-title').textContent = `${prenom} ${nom}`;
-        document.getElementById('historique-info').innerHTML = `
-          <div class="info-av">${prenom[0].toUpperCase()}${nom[0].toUpperCase()}</div>
-          <div class="info-details">
-            <p><strong>${prenom} ${nom}</strong><br>📞 ${telephone || 'Non renseigné'}</p>
-          </div>`;
+        document.getElementById('historique-info').innerHTML = buildInfoCard({ prenom, nom, telephone, telephone2 });
       }
       closeModal(); toast('Cliente modifiée');
     } else {
@@ -925,7 +934,7 @@ function openModalCliente(cliente = null) {
         .select('id').ilike('nom', nom).ilike('prenom', prenom).maybeSingle();
       if (dup) { toast(`"${prenom} ${nom}" existe déjà dans la liste`); return; }
 
-      const { error } = await db.from('clientes').insert({ prenom, nom, telephone });
+      const { error } = await db.from('clientes').insert({ prenom, nom, telephone, telephone2 });
       if (error) { toast('Erreur : ' + error.message); return; }
       closeModal(); toast('Cliente ajoutée'); renderClientes();
     }
