@@ -903,11 +903,10 @@ function openModalCliente(cliente = null) {
     if (!prenom || !nom) { toast('Veuillez saisir le nom complet'); return; }
 
     if (cliente) {
-      // Vérifier doublon sur une autre cliente
       const { data: dup } = await db.from('clientes')
         .select('id').ilike('nom', nom).ilike('prenom', prenom)
         .neq('id', cliente.id).maybeSingle();
-      if (dup && !confirm(`Une cliente "${prenom} ${nom}" existe déjà. Modifier quand même ?`)) return;
+      if (dup) { toast(`"${prenom} ${nom}" existe déjà dans la liste`); return; }
 
       const { error } = await db.from('clientes').update({ prenom, nom, telephone }).eq('id', cliente.id);
       if (error) { toast('Erreur : ' + error.message); return; }
@@ -922,16 +921,10 @@ function openModalCliente(cliente = null) {
       }
       closeModal(); toast('Cliente modifiée');
     } else {
-      // Vérifier doublon avant création
       const { data: dup } = await db.from('clientes')
-        .select('id, telephone').ilike('nom', nom).ilike('prenom', prenom).maybeSingle();
-      if (dup) {
-        const msg = dup.telephone === telephone
-          ? `"${prenom} ${nom}" avec ce numéro existe déjà.`
-          : `Une cliente "${prenom} ${nom}" existe déjà (numéro différent). Ajouter quand même ?`;
-        if (dup.telephone === telephone) { toast(msg); return; }
-        if (!confirm(msg)) return;
-      }
+        .select('id').ilike('nom', nom).ilike('prenom', prenom).maybeSingle();
+      if (dup) { toast(`"${prenom} ${nom}" existe déjà dans la liste`); return; }
+
       const { error } = await db.from('clientes').insert({ prenom, nom, telephone });
       if (error) { toast('Erreur : ' + error.message); return; }
       closeModal(); toast('Cliente ajoutée'); renderClientes();
