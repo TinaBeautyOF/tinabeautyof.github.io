@@ -228,18 +228,17 @@ input, select { font-family: inherit; }
 
 /* Day chips */
 .day-selector {
-  display: flex; gap: 8px;
-  overflow-x: auto; padding-bottom: 16px;
-  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  display: flex; gap: 5px;
+  padding-bottom: 16px;
 }
-.day-selector::-webkit-scrollbar { display: none; }
 
 .day-chip {
-  flex-shrink: 0; display: flex; flex-direction: column;
-  align-items: center; padding: 10px 8px 8px;
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column;
+  align-items: center; padding: 9px 4px 7px;
   border-radius: var(--radius-sm); background: var(--bg-card);
   box-shadow: var(--shadow-xs); cursor: pointer;
-  border: 2px solid transparent; min-width: 52px; gap: 5px;
+  border: 2px solid transparent; gap: 4px;
   transition: all .18s;
 }
 .day-chip.active {
