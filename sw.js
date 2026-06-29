@@ -1,4 +1,4 @@
-const CACHE = 'tinabeauty-v1';
+const CACHE = 'tinabeauty-v2';
 const ASSETS = [
   './',
   './index.html',

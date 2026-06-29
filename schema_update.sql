@@ -36,15 +36,32 @@ UPDATE public.rendezvous SET statut = 'en_attente' WHERE statut IS NULL;
 ALTER TABLE public.rendezvous ALTER COLUMN statut SET NOT NULL;
 ALTER TABLE public.rendezvous ALTER COLUMN statut SET DEFAULT 'en_attente';
 
--- Contrainte sur les valeurs autorisées
+-- Contrainte sur les valeurs autorisées (inclut 'annule')
 ALTER TABLE public.rendezvous
 DROP CONSTRAINT IF EXISTS rendezvous_statut_check;
 ALTER TABLE public.rendezvous
 ADD CONSTRAINT rendezvous_statut_check
-CHECK (statut IN ('en_attente', 'presente', 'absente'));
+CHECK (statut IN ('en_attente', 'presente', 'absente', 'annule'));
+
+-- 5. Ajouter les champs crédit et solde sur rendezvous
+ALTER TABLE public.rendezvous
+ADD COLUMN IF NOT EXISTS credit NUMERIC(10,2) NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS solde  NUMERIC(10,2) NOT NULL DEFAULT 0;
+
+-- 6. Nouvelle table : achats du salon
+CREATE TABLE IF NOT EXISTS public.achats (
+  id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  nom        TEXT NOT NULL,
+  prix       NUMERIC(10,2) NOT NULL DEFAULT 0,
+  date       DATE NOT NULL DEFAULT CURRENT_DATE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE public.achats DISABLE ROW LEVEL SECURITY;
+
+CREATE INDEX IF NOT EXISTS idx_achats_date ON public.achats(date);
 
 -- ============================================================
--- Vérification : les 5 tables doivent exister
+-- Vérification : les 6 tables doivent exister
 -- SELECT table_name FROM information_schema.tables
 -- WHERE table_schema = 'public';
 -- ============================================================

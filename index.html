@@ -6,10 +6,13 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TinaBeauty">
-  <meta name="theme-color" content="#c9486e">
+  <meta name="theme-color" content="#E8B4B8">
   <title>TinaBeauty</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -64,7 +67,7 @@
     <section id="view-prestations" class="view">
       <div class="cat-bar-wrap">
         <div id="cat-bar" class="cat-bar"></div>
-        <button id="manage-cats-btn" class="manage-cats-btn" title="Gérer les catégories">&#9881;</button>
+        <button id="manage-cats-btn" class="manage-cats-btn" title="Gérer les catégories">Gérer</button>
       </div>
       <div id="prestations-list"></div>
     </section>
@@ -72,19 +75,19 @@
     <!-- Clientes -->
     <section id="view-clientes" class="view">
       <div class="search-bar">
-        <input type="search" id="search-clientes" placeholder="&#128269; Rechercher une cliente…" autocomplete="off">
+        <input type="search" id="search-clientes" placeholder="Rechercher une cliente…" autocomplete="off">
       </div>
       <!-- Android : Contact Picker API -->
       <button id="import-contacts-btn" class="import-contacts-btn hidden">
-        &#128241; Importer depuis mes contacts
+        Importer depuis mes contacts
       </button>
       <!-- iOS : import fichier vCard -->
       <label id="import-vcf-label" class="import-contacts-btn hidden">
-        &#128196; Importer un fichier vCard (.vcf)
+        Importer un fichier vCard (.vcf)
         <input type="file" id="import-vcf-input" accept=".vcf,text/vcard" style="display:none">
       </label>
       <div id="clientes-list"></div>
-      <button id="export-btn" class="export-btn">&#128229; Exporter tout l'historique (CSV)</button>
+      <button id="export-btn" class="export-btn">Exporter tout l'historique (CSV)</button>
     </section>
 
     <!-- Historique -->
@@ -92,6 +95,21 @@
       <div class="info-card" id="historique-info"></div>
       <h2 class="section-title">Historique des rendez-vous</h2>
       <div id="historique-list"></div>
+    </section>
+
+    <!-- Finances -->
+    <section id="view-finances" class="view">
+      <div class="finances-tabs">
+        <button class="finances-tab active" data-fin="achats">Achats</button>
+        <button class="finances-tab" data-fin="chiffres">Chiffre d'affaire</button>
+      </div>
+      <div id="finances-achats" class="finances-panel active">
+        <div id="achats-list"></div>
+        <button id="add-achat-btn" class="finances-fab">+ Ajouter un achat</button>
+      </div>
+      <div id="finances-chiffres" class="finances-panel">
+        <div id="chiffres-list"></div>
+      </div>
     </section>
 
   </main>
@@ -113,6 +131,10 @@
     <button class="tab" data-view="clientes">
       <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
       <span>Clientes</span>
+    </button>
+    <button class="tab" data-view="finances">
+      <svg viewBox="0 0 24 24"><path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"/></svg>
+      <span>Finances</span>
     </button>
   </nav>
 

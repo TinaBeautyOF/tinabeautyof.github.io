@@ -26,6 +26,7 @@ const state = {
   selPrestIds:  [],     // [{id, nom, prix}]
   selClienteId: null,
   selClienteNom: '',
+  financesTab:  'achats',
 };
 
 /* ============================================================
@@ -75,6 +76,38 @@ function fmtDayFull(d) {
 }
 
 /* ============================================================
+   HELPERS — Calculs & formatage
+   ============================================================ */
+function fmtMoney(n) {
+  return Number(n || 0).toLocaleString('fr-DZ') + ' DA';
+}
+
+function calcRdvTotal(rdv) {
+  return (rdv.rendezvous_prestations || []).reduce((s, rp) => s + (rp.prestations?.prix || 0), 0);
+}
+
+function calcClientBalance(clienteId, rdvs) {
+  // Somme des crédits - somme des soldes sur tous les RDV de la cliente
+  return (rdvs || []).reduce((s, r) => {
+    if (r.cliente_id !== clienteId && r.clientes?.id !== clienteId) return s;
+    return s + (r.credit || 0) - (r.solde || 0);
+  }, 0);
+}
+
+function renderStatusButtons(rdv, prefix = 'rdv') {
+  const statut = rdv.statut || 'en_attente';
+  const cls = prefix === 'histo' ? 'histo-status-btn' : 'status-btn';
+  const rowCls = prefix === 'histo' ? 'histo-status-row' : 'rdv-status-row';
+  if (statut === 'annule') {
+    return `<div class="status-badge annule">Rendez-vous annulé</div>`;
+  }
+  return `<div class="${rowCls}">
+    <button class="${cls} presente ${statut === 'presente' ? 'active' : ''}" data-id="${rdv.id}" data-s="presente">Présente</button>
+    <button class="${cls} absente  ${statut === 'absente'  ? 'active' : ''}" data-id="${rdv.id}" data-s="absente">Absente</button>
+  </div>`;
+}
+
+/* ============================================================
    TOAST
    ============================================================ */
 let toastTimer;
@@ -103,7 +136,7 @@ function navigateTo(viewName, skipTab = false) {
 
   state.view = viewName;
 
-  const titles = { accueil: 'TinaBeauty', planning: 'Planning', prestations: 'Prestations', clientes: 'Clientes' };
+  const titles = { accueil: 'TinaBeauty', planning: 'Planning', prestations: 'Prestations', clientes: 'Clientes', finances: 'Finances' };
   const backBtn      = document.getElementById('back-btn');
   const headerAction = document.getElementById('header-action');
 
@@ -111,7 +144,7 @@ function navigateTo(viewName, skipTab = false) {
     const c = state.histCliente;
     document.getElementById('view-title').textContent = c ? `${c.prenom} ${c.nom}` : 'Historique';
     backBtn.classList.remove('hidden');
-    headerAction.textContent = '✏️';
+    headerAction.textContent = 'Modifier';
     headerAction.classList.remove('hidden');
     headerAction.onclick = () => openModalCliente(state.histCliente);
   } else {
@@ -125,6 +158,8 @@ function navigateTo(viewName, skipTab = false) {
       headerAction.textContent = '+';
       headerAction.classList.remove('hidden');
       headerAction.onclick = () => openModalCliente();
+    } else if (viewName === 'finances') {
+      headerAction.classList.add('hidden');
     } else {
       headerAction.classList.add('hidden');
     }
@@ -134,6 +169,7 @@ function navigateTo(viewName, skipTab = false) {
   else if (viewName === 'planning')    renderPlanning();
   else if (viewName === 'prestations') renderPrestations();
   else if (viewName === 'clientes')    renderClientes();
+  else if (viewName === 'finances')    renderFinances();
 }
 
 /* ============================================================
@@ -161,7 +197,7 @@ async function loadRdvRange(from, to) {
   const { data, error } = await db
     .from('rendezvous')
     .select(`
-      id, date, creneau, statut,
+      id, date, creneau, statut, credit, solde, cliente_id,
       clientes ( id, nom, prenom ),
       rendezvous_prestations (
         prestation_id,
@@ -172,6 +208,19 @@ async function loadRdvRange(from, to) {
     .lte('date', to)
     .order('date')
     .order('creneau');
+  if (error) { console.error(error); return []; }
+  return data || [];
+}
+
+async function loadAllClientRdvs(clienteId) {
+  const { data, error } = await db
+    .from('rendezvous')
+    .select(`
+      id, date, creneau, statut, credit, solde, cliente_id,
+      rendezvous_prestations ( prestations ( id, nom, prix ) )
+    `)
+    .eq('cliente_id', clienteId)
+    .order('date', { ascending: false });
   if (error) { console.error(error); return []; }
   return data || [];
 }
@@ -203,35 +252,34 @@ function fillAccueilList(containerId, rdvs, showStatus) {
   el.innerHTML = rdvs.map(r => {
     const c      = r.clientes;
     const prests = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
-    const statut = r.statut || 'en_attente';
+    const total  = calcRdvTotal(r);
+    const balanceNote = (r.credit || r.solde)
+      ? `<span class="rdv-prests">${fmtMoney(total)} — ${r.credit ? 'crédit ' + fmtMoney(r.credit) : 'solde ' + fmtMoney(r.solde)}</span>`
+      : `<span class="rdv-prests">${prests.join(' · ') || 'Aucune prestation'}</span>`;
 
-    let statusHtml = '';
-    if (showStatus) {
-      if (statut === 'annule') {
-        statusHtml = `<div class="status-badge annule">🚫 Rendez-vous annulé</div>`;
-      } else {
-        statusHtml = `<div class="rdv-status-row">
-          <button class="status-btn presente ${statut === 'presente' ? 'active' : ''}" data-id="${r.id}" data-s="presente">✓ Présente</button>
-          <button class="status-btn absente  ${statut === 'absente'  ? 'active' : ''}" data-id="${r.id}" data-s="absente">✗ Absente</button>
-        </div>`;
-      }
-    }
-
-    return `<div class="rdv-card">
+    return `<div class="rdv-card" data-rdv="${r.id}" data-date="${r.date}" data-cr="${r.creneau}">
       <div class="rdv-card-top">
         <div class="rdv-time">${r.creneau}</div>
         <div class="rdv-info">
           <div class="rdv-client">${c ? c.prenom + ' ' + c.nom : '—'}</div>
-          <div class="rdv-prests">${prests.join(' · ') || 'Aucune prestation'}</div>
+          ${balanceNote}
         </div>
       </div>
-      ${statusHtml}
+      ${showStatus ? renderStatusButtons(r, 'rdv') : ''}
     </div>`;
   }).join('');
 
-  // Boutons de statut
+  // Ouvrir la modale au clic sur la carte
+  el.querySelectorAll('.rdv-card').forEach(card => {
+    card.addEventListener('click', () => {
+      openModalRdv(card.dataset.date, card.dataset.cr, card.dataset.rdv);
+    });
+  });
+
+  // Boutons de statut — stopper la propagation pour ne pas ouvrir la modale
   el.querySelectorAll('.status-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
       await updateStatut(btn.dataset.id, btn.dataset.s);
       renderAccueil();
     });
@@ -241,7 +289,7 @@ function fillAccueilList(containerId, rdvs, showStatus) {
 async function updateStatut(rdvId, statut) {
   const { error } = await db.from('rendezvous').update({ statut }).eq('id', rdvId);
   if (error) { toast('Erreur : ' + error.message); return; }
-  toast(statut === 'presente' ? 'Marquée présente ✓' : 'Marquée absente ✗');
+  toast(statut === 'presente' ? 'Marquée présente' : 'Marquée absente');
 }
 
 /* ============================================================
@@ -314,13 +362,17 @@ function renderDayView(dateStr, rdvs) {
       const c       = r.clientes;
       const prests  = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
       const annule  = r.statut === 'annule';
+      const total   = calcRdvTotal(r);
+      const balanceNote = (!annule && (r.credit || r.solde))
+        ? (r.credit ? 'crédit ' + fmtMoney(r.credit) : 'solde ' + fmtMoney(r.solde))
+        : (annule ? 'Annulé' : (prests.join(' · ') || 'Aucune prestation'));
       return `<div class="day-rdv-card ${annule ? 'annule' : ''}" data-rdv="${r.id}" data-date="${r.date}" data-cr="${r.creneau}">
         <span class="day-rdv-time">${r.creneau}</span>
         <div class="day-rdv-info">
           <div class="day-rdv-client">${c ? c.prenom + ' ' + c.nom : '—'}</div>
-          <div class="day-rdv-prests">${annule ? '🚫 Annulé' : (prests.join(' · ') || 'Aucune prestation')}</div>
+          <div class="day-rdv-prests">${balanceNote}</div>
         </div>
-        <span class="day-rdv-edit">${annule ? '' : '✏️'}</span>
+        <span class="day-rdv-edit">${annule ? '' : '›'}</span>
       </div>`;
     }).join('');
   }
@@ -352,7 +404,7 @@ async function renderPrestations() {
       state.selectedCat = state.categories[0]?.nom || null;
     }
     catBar.innerHTML = state.categories.map(c => `
-      <div class="cat-chip ${c.nom === state.selectedCat ? 'active' : ''}" data-nom="${c.nom}">
+      <div class="cat-chip ${c.nom === 'Onglerie' ? 'sage' : ''} ${c.nom === state.selectedCat ? 'active' : ''}" data-nom="${c.nom}">
         ${c.nom}
       </div>`).join('');
     catBar.querySelectorAll('.cat-chip').forEach(chip => {
@@ -368,11 +420,11 @@ async function renderPrestations() {
   const items = state.prestations.filter(p => p.categorie === state.selectedCat);
 
   if (!state.selectedCat) {
-    container.innerHTML = `<div class="empty-state"><div class="emo">✨</div><p>Ajoutez d'abord une catégorie<br>en appuyant sur ⚙</p></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="emo">—</div><p>Ajoutez d'abord une catégorie<br>en appuyant sur l'icône en haut</p></div>`;
     return;
   }
   if (!items.length) {
-    container.innerHTML = `<div class="empty-state"><div class="emo">✨</div><p>Aucune prestation dans <strong>${state.selectedCat}</strong>.<br>Appuyez sur <strong>+</strong> pour en ajouter.</p></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="emo">—</div><p>Aucune prestation dans <strong>${state.selectedCat}</strong>.<br>Appuyez sur <strong>+</strong> pour en ajouter.</p></div>`;
     return;
   }
 
@@ -408,7 +460,7 @@ async function renderClientes(filter = '') {
   }
 
   if (!list.length) {
-    container.innerHTML = `<div class="empty-state"><div class="emo">👩</div><p>${filter ? 'Aucun résultat.' : 'Aucune cliente.<br>Appuyez sur <strong>+</strong> pour en ajouter.'}</p></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="emo">—</div><p>${filter ? 'Aucun résultat.' : 'Aucune cliente.<br>Appuyez sur <strong>+</strong> pour en ajouter.'}</p></div>`;
     return;
   }
 
@@ -525,19 +577,22 @@ async function exportCSV() {
   if (error || !data) { toast('Erreur d\'export'); return; }
 
   const lines = [
-    ['Prénom', 'Nom', 'Téléphone', 'Date', 'Heure', 'Prestations', 'Total (DA)', 'Statut'].join(';')
+    ['Prénom', 'Nom', 'Téléphone', 'Date', 'Heure', 'Prestations', 'Total (DA)', 'Crédit (DA)', 'Solde (DA)', 'Encaissement (DA)', 'Statut'].join(';')
   ];
 
   data.forEach(r => {
     const c      = r.clientes || {};
     const prests = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
     const total  = (r.rendezvous_prestations || []).reduce((s, rp) => s + (rp.prestations?.prix || 0), 0);
+    const credit = r.credit || 0;
+    const solde  = r.solde || 0;
+    const enc    = total - credit + solde;
     const statut = { en_attente: 'En attente', presente: 'Présente', absente: 'Absente', annule: 'Annulé' }[r.statut] || r.statut;
     lines.push([
       c.prenom || '', c.nom || '', c.telephone || '',
       r.date, r.creneau,
       `"${prests.join(', ')}"`,
-      total, statut
+      total, credit, solde, enc, statut
     ].join(';'));
   });
 
@@ -548,26 +603,36 @@ async function exportCSV() {
   a.download = `tinabeauty_historique_${toISO(new Date())}.csv`;
   a.click();
   URL.revokeObjectURL(url);
-  toast('Export réussi ✓');
+  toast('Export réussi');
 }
 
 /* ============================================================
    HISTORIQUE
    ============================================================ */
-function buildInfoCard(c) {
+function buildInfoCard(c, balance = 0) {
   const initials = c.prenom[0].toUpperCase() + c.nom[0].toUpperCase();
-  const tel2 = c.telephone2 ? `<br>📞 ${c.telephone2}` : '';
+  const tel2 = c.telephone2 ? `<br>${c.telephone2}` : '';
+  let balanceHtml = '';
+  if (balance > 0) {
+    balanceHtml = `<br><span style="color:var(--red)">Me doit ${fmtMoney(balance)}</span>`;
+  } else if (balance < 0) {
+    balanceHtml = `<br><span style="color:var(--green)">Je lui dois ${fmtMoney(Math.abs(balance))}</span>`;
+  } else {
+    balanceHtml = `<br><span>Solde à jour</span>`;
+  }
   return `<div class="info-av">${initials}</div>
     <div class="info-details">
       <p><strong>${c.prenom} ${c.nom}</strong><br>
-      📞 ${c.telephone || 'Non renseigné'}${tel2}</p>
+      ${c.telephone || 'Non renseigné'}${tel2}${balanceHtml}</p>
     </div>`;
 }
 
 async function openHistorique(cliente) {
   state.histCliente = cliente;
   navigateTo('historique', true);
-  document.getElementById('historique-info').innerHTML = buildInfoCard(cliente);
+  const rdvs = await loadAllClientRdvs(cliente.id);
+  const balance = calcClientBalance(cliente.id, rdvs);
+  document.getElementById('historique-info').innerHTML = buildInfoCard(cliente, balance);
 
   const listEl = document.getElementById('historique-list');
   listEl.innerHTML = '<div class="loader">Chargement…</div>';
@@ -588,20 +653,18 @@ async function openHistorique(cliente) {
 
   listEl.innerHTML = data.map(r => {
     const prests = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
-    const total  = (r.rendezvous_prestations || []).reduce((s, rp) => s + (rp.prestations?.prix || 0), 0);
+    const total  = calcRdvTotal(r);
+    const enc    = total - (r.credit || 0) + (r.solde || 0);
     const dateObj = new Date(r.date + 'T12:00:00');
-    const statut  = r.statut || 'en_attente';
+    let balanceHtml = '';
+    if (r.credit) balanceHtml += `<span style="color:var(--red)">Crédit ${fmtMoney(r.credit)}</span> `;
+    if (r.solde)  balanceHtml += `<span style="color:var(--green)">Solde ${fmtMoney(r.solde)}</span>`;
     return `<div class="histo-card">
       <div class="histo-date">${fmtFull(dateObj)} à ${r.creneau}</div>
       <div class="histo-prests">${prests.join(', ') || 'Aucune prestation'}</div>
-      ${total > 0 ? `<div class="histo-total">${Number(total).toLocaleString('fr-DZ')} DA</div>` : ''}
-      ${statut === 'annule'
-        ? `<div class="status-badge annule" style="margin-top:8px">🚫 Annulé</div>`
-        : `<div class="histo-status-row">
-            <button class="histo-status-btn presente ${statut === 'presente' ? 'active' : ''}" data-id="${r.id}" data-s="presente">✓ Présente</button>
-            <button class="histo-status-btn absente  ${statut === 'absente'  ? 'active' : ''}" data-id="${r.id}" data-s="absente">✗ Absente</button>
-          </div>`
-      }
+      ${total > 0 ? `<div class="histo-total">${fmtMoney(total)} · encaissé ${fmtMoney(enc)}</div>` : ''}
+      ${balanceHtml ? `<div class="histo-balance">${balanceHtml}</div>` : ''}
+      ${renderStatusButtons(r, 'histo')}
     </div>`;
   }).join('');
 
@@ -611,6 +674,190 @@ async function openHistorique(cliente) {
       openHistorique(state.histCliente);
     });
   });
+}
+
+async function updateSoldeHint() {
+  const hint = document.getElementById('solde-cliente-hint');
+  if (!hint) return;
+  if (!state.selClienteId) {
+    hint.style.display = 'none';
+    return;
+  }
+  const rdvs = await loadAllClientRdvs(state.selClienteId);
+  const balance = calcClientBalance(state.selClienteId, rdvs);
+  hint.style.display = 'block';
+  if (balance > 0) {
+    hint.innerHTML = `<strong>${state.selClienteNom}</strong> vous doit <strong>${fmtMoney(balance)}</strong> au total.`;
+  } else if (balance < 0) {
+    hint.innerHTML = `Vous devez <strong>${fmtMoney(Math.abs(balance))}</strong> à <strong>${state.selClienteNom}</strong>.`;
+  } else {
+    hint.innerHTML = `<strong>${state.selClienteNom}</strong> est à jour.`;
+  }
+}
+
+/* ============================================================
+   FINANCES
+   ============================================================ */
+async function loadAchats() {
+  const { data, error } = await db.from('achats').select('*').order('date', { ascending: false });
+  if (error) { console.error(error); return []; }
+  return data || [];
+}
+
+function financesPeriodBounds() {
+  const today = new Date();
+  // Semaine : samedi → vendredi
+  const ws = getSaturday(today);
+  const we = addDays(ws, 6);
+  // Mois
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthEnd   = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  // Année
+  const yearStart = new Date(today.getFullYear(), 0, 1);
+  const yearEnd   = new Date(today.getFullYear(), 11, 31);
+  return {
+    week:  { start: toISO(ws),  end: toISO(we) },
+    month: { start: toISO(monthStart), end: toISO(monthEnd) },
+    year:  { start: toISO(yearStart),  end: toISO(yearEnd) }
+  };
+}
+
+async function calcChiffres(period) {
+  const rdvs = await loadRdvRange(period.start, period.end);
+  const achats = (await loadAchats()).filter(a => a.date >= period.start && a.date <= period.end);
+
+  const ca = rdvs
+    .filter(r => r.statut === 'presente')
+    .reduce((s, r) => s + calcRdvTotal(r) - (r.credit || 0) + (r.solde || 0), 0);
+
+  const totalAchats = achats.reduce((s, a) => s + (a.prix || 0), 0);
+  return { ca, achats: totalAchats, benefice: ca - totalAchats };
+}
+
+async function renderFinances() {
+  renderAchats();
+  renderChiffres();
+
+  document.querySelectorAll('.finances-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.fin === state.financesTab);
+  });
+  document.getElementById('finances-achats').classList.toggle('active', state.financesTab === 'achats');
+  document.getElementById('finances-chiffres').classList.toggle('active', state.financesTab === 'chiffres');
+}
+
+async function renderAchats() {
+  const list = await loadAchats();
+  const el = document.getElementById('achats-list');
+  if (!list.length) {
+    el.innerHTML = `<div class="empty-state"><div class="emo">—</div><p>Aucun achat enregistré.<br>Appuyez sur le bouton ci-dessous pour ajouter un achat.</p></div>`;
+    return;
+  }
+  el.innerHTML = list.map(a => `
+    <div class="achat-card" data-id="${a.id}">
+      <div>
+        <div class="achat-name">${a.nom}</div>
+        <div class="achat-date">${fmtDayFull(new Date(a.date + 'T12:00:00'))}</div>
+      </div>
+      <div class="achat-right">
+        <span class="achat-price">${fmtMoney(a.prix)}</span>
+        <button class="achat-del" aria-label="Supprimer">×</button>
+      </div>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('.achat-del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.closest('.achat-card').dataset.id;
+      if (!confirm('Supprimer cet achat ?')) return;
+      await db.from('achats').delete().eq('id', id);
+      toast('Achat supprimé');
+      renderAchats();
+      renderChiffres();
+    });
+  });
+}
+
+async function renderChiffres() {
+  const p = financesPeriodBounds();
+  const week  = await calcChiffres(p.week);
+  const month = await calcChiffres(p.month);
+  const year  = await calcChiffres(p.year);
+
+  function row(label, value, cls = '') {
+    return `<div class="chiffre-row"><span class="chiffre-label">${label}</span><span class="chiffre-value ${cls}">${fmtMoney(value)}</span></div>`;
+  }
+  function benefCls(v) { return v >= 0 ? 'positive' : 'negative'; }
+
+  document.getElementById('chiffres-list').innerHTML = `
+    <div class="chiffre-card">
+      <div class="chiffre-title">Cette semaine</div>
+      ${row('Chiffre d\'affaire', week.ca)}
+      ${row('Achats', week.achats)}
+      ${row('Bénéfice estimé', week.benefice, benefCls(week.benefice))}
+    </div>
+    <div class="chiffre-card">
+      <div class="chiffre-title">Ce mois</div>
+      ${row('Chiffre d\'affaire', month.ca)}
+      ${row('Achats', month.achats)}
+      ${row('Bénéfice estimé', month.benefice, benefCls(month.benefice))}
+    </div>
+    <div class="chiffre-card">
+      <div class="chiffre-title">Cette année</div>
+      ${row('Chiffre d\'affaire', year.ca)}
+      ${row('Achats', year.achats)}
+      ${row('Bénéfice estimé', year.benefice, benefCls(year.benefice))}
+    </div>
+  `;
+}
+
+async function openModalAchat(achat = null) {
+  document.getElementById('modal-title').textContent = achat ? 'Modifier l\'achat' : 'Nouvel achat';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group">
+      <label>Nom du produit</label>
+      <input type="text" id="f-anom" placeholder="Ex : Gel UV, Coton, etc." value="${achat?.nom || ''}">
+    </div>
+    <div class="form-group">
+      <label>Prix (DA)</label>
+      <input type="number" id="f-aprix" placeholder="Ex : 2500" inputmode="numeric" value="${achat?.prix !== undefined ? achat.prix : ''}">
+    </div>
+    <div class="form-group">
+      <label>Date</label>
+      <input type="date" id="f-adate" value="${achat?.date || toISO(new Date())}">
+    </div>`;
+
+  const delBtn = document.getElementById('modal-delete');
+  if (achat) {
+    delBtn.classList.remove('hidden');
+    delBtn.onclick = async () => {
+      if (!confirm('Supprimer cet achat ?')) return;
+      await db.from('achats').delete().eq('id', achat.id);
+      closeModal(); toast('Achat supprimé'); renderFinances();
+    };
+  } else {
+    delBtn.classList.add('hidden');
+  }
+
+  document.getElementById('modal-save').onclick = async () => {
+    const nom  = document.getElementById('f-anom').value.trim();
+    const prix = parseFloat(document.getElementById('f-aprix').value);
+    const date = document.getElementById('f-adate').value;
+    if (!nom) { toast('Veuillez saisir un nom'); return; }
+    if (isNaN(prix) || prix < 0) { toast('Veuillez saisir un prix valide'); return; }
+    if (!date) { toast('Veuillez choisir une date'); return; }
+
+    const payload = { nom, prix, date };
+    if (achat) {
+      const { error } = await db.from('achats').update(payload).eq('id', achat.id);
+      if (error) { toast('Erreur : ' + error.message); return; }
+    } else {
+      const { error } = await db.from('achats').insert(payload);
+      if (error) { toast('Erreur : ' + error.message); return; }
+    }
+    closeModal(); toast(achat ? 'Achat modifié' : 'Achat ajouté'); renderFinances();
+  };
+
+  openModal();
 }
 
 /* ============================================================
@@ -626,6 +873,7 @@ async function openModalRdv(date, creneau, rdvId) {
   state.selClienteNom = '';
 
   let rdvStatut = 'en_attente';
+  let rdvData   = null;
 
   if (rdvId) {
     const { data } = await db
@@ -633,6 +881,7 @@ async function openModalRdv(date, creneau, rdvId) {
       .select('*, rendezvous_prestations(prestation_id)')
       .eq('id', rdvId)
       .single();
+    rdvData = data;
     if (data) {
       state.selClienteId = data.cliente_id;
       rdvStatut = data.statut || 'en_attente';
@@ -683,7 +932,20 @@ async function openModalRdv(date, creneau, rdvId) {
         <div id="prest-results" class="search-results hidden"></div>
       </div>
     </div>
-    ${rdvId ? `<button type="button" id="annuler-rdv-btn" class="btn-annuler">❌ Annuler ce rendez-vous</button>` : ''}`;
+    <div class="form-row" style="display:flex;gap:10px">
+      <div class="form-group" style="flex:1">
+        <label>Crédit (cliente me doit)</label>
+        <input type="number" id="f-credit" inputmode="numeric" value="${rdvData?.credit || 0}">
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>Solde (je garde pour elle)</label>
+        <input type="number" id="f-solde" inputmode="numeric" value="${rdvData?.solde || 0}">
+      </div>
+    </div>
+    <div id="solde-cliente-hint" class="solde-hint"></div>
+    ${rdvId ? `<button type="button" id="annuler-rdv-btn" class="btn-annuler">Annuler ce rendez-vous</button>` : ''}`;
+
+  updateSoldeHint();
 
   // Afficher les tags prestations déjà sélectionnées
   refreshPrestTags();
@@ -709,7 +971,7 @@ async function openModalRdv(date, creneau, rdvId) {
       : '<div class="sr-empty">Aucune cliente trouvée</div>';
 
     clienteResults.querySelectorAll('.sr-item').forEach(item => {
-      item.addEventListener('click', () => {
+      item.addEventListener('click', async () => {
         state.selClienteId  = item.dataset.id;
         state.selClienteNom = item.dataset.nom;
         document.getElementById('sel-cliente-nom').textContent = item.dataset.nom;
@@ -717,6 +979,7 @@ async function openModalRdv(date, creneau, rdvId) {
         clienteWrap.classList.add('hidden');
         clienteResults.classList.add('hidden');
         clienteInput.value = '';
+        await updateSoldeHint();
       });
     });
   });
@@ -726,6 +989,7 @@ async function openModalRdv(date, creneau, rdvId) {
     state.selClienteNom = '';
     clienteBadge.classList.add('hidden');
     clienteWrap.classList.remove('hidden');
+    updateSoldeHint();
   });
 
   // ---- Recherche prestations ----
@@ -781,8 +1045,10 @@ async function openModalRdv(date, creneau, rdvId) {
 
   // ---- Enregistrer ----
   document.getElementById('modal-save').onclick = async () => {
-    const dateVal  = document.getElementById('f-date').value;
-    const heureVal = document.getElementById('f-heure').value;
+    const dateVal   = document.getElementById('f-date').value;
+    const heureVal  = document.getElementById('f-heure').value;
+    const creditVal = parseFloat(document.getElementById('f-credit').value) || 0;
+    const soldeVal  = parseFloat(document.getElementById('f-solde').value)  || 0;
 
     if (!dateVal)             { toast('Veuillez choisir une date'); return; }
     if (!heureVal)            { toast('Veuillez saisir l\'heure'); return; }
@@ -790,7 +1056,8 @@ async function openModalRdv(date, creneau, rdvId) {
 
     if (rdvId) {
       await db.from('rendezvous').update({
-        date: dateVal, creneau: heureVal, cliente_id: state.selClienteId
+        date: dateVal, creneau: heureVal, cliente_id: state.selClienteId,
+        credit: creditVal, solde: soldeVal
       }).eq('id', rdvId);
 
       await db.from('rendezvous_prestations').delete().eq('rendezvous_id', rdvId);
@@ -807,7 +1074,7 @@ async function openModalRdv(date, creneau, rdvId) {
       if (conflict) { toast('Ce créneau est déjà pris'); return; }
 
       const { data: newRdv, error } = await db.from('rendezvous')
-        .insert({ date: dateVal, creneau: heureVal, cliente_id: state.selClienteId })
+        .insert({ date: dateVal, creneau: heureVal, cliente_id: state.selClienteId, credit: creditVal, solde: soldeVal })
         .select().single();
       if (error) { toast('Erreur : ' + error.message); return; }
 
@@ -919,7 +1186,7 @@ async function openModalCategories() {
         ${state.categories.map(c => `
           <div class="cat-manage-item" data-id="${c.id}" data-nom="${c.nom}">
             <span class="cat-manage-name">${c.nom}</span>
-            <button class="cat-manage-del" data-id="${c.id}" data-nom="${c.nom}">🗑</button>
+            <button class="cat-manage-del" data-id="${c.id}" data-nom="${c.nom}">×</button>
           </div>`).join('')}
       </div>
       <div class="cat-add-row">
@@ -1111,6 +1378,15 @@ function init() {
   document.getElementById('manage-cats-btn').addEventListener('click', openModalCategories);
 
   document.getElementById('export-btn').addEventListener('click', exportCSV);
+
+  document.getElementById('add-achat-btn').addEventListener('click', () => openModalAchat());
+
+  document.querySelectorAll('.finances-tab').forEach(t => {
+    t.addEventListener('click', () => {
+      state.financesTab = t.dataset.fin;
+      renderFinances();
+    });
+  });
 
   navigateTo('accueil');
 
