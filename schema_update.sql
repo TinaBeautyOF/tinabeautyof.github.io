@@ -48,6 +48,11 @@ ALTER TABLE public.rendezvous
 ADD COLUMN IF NOT EXISTS credit NUMERIC(10,2) NOT NULL DEFAULT 0,
 ADD COLUMN IF NOT EXISTS solde  NUMERIC(10,2) NOT NULL DEFAULT 0;
 
+-- 7. Ajouter les champs téléphone 2 et Instagram sur clientes
+ALTER TABLE public.clientes
+ADD COLUMN IF NOT EXISTS telephone2 TEXT,
+ADD COLUMN IF NOT EXISTS instagram  TEXT;
+
 -- 6. Nouvelle table : achats du salon
 CREATE TABLE IF NOT EXISTS public.achats (
   id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,

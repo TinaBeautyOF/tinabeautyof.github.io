@@ -466,10 +466,10 @@ async function renderClientes(filter = '') {
 
   container.innerHTML = list.map(c => `
     <div class="cliente-card" data-id="${c.id}">
-      <div class="cliente-av">${c.prenom[0].toUpperCase()}${c.nom[0].toUpperCase()}</div>
+      <div class="cliente-av">${(c.prenom?.[0] || '').toUpperCase()}${(c.nom?.[0] || '').toUpperCase()}</div>
       <div class="cliente-info">
-        <div class="cliente-name">${c.prenom} ${c.nom}</div>
-        <div class="cliente-phone">${c.telephone || 'Pas de numéro'}${c.telephone2 ? '<br>' + c.telephone2 : ''}</div>
+        <div class="cliente-name">${c.prenom || ''} ${c.nom || ''}</div>
+        <div class="cliente-phone">${c.telephone || 'Pas de numéro'}${c.telephone2 ? '<br>' + c.telephone2 : ''}${c.instagram ? '<br>Instagram : ' + c.instagram : ''}</div>
       </div>
       <span class="cliente-arrow">›</span>
     </div>`).join('');
@@ -610,8 +610,9 @@ async function exportCSV() {
    HISTORIQUE
    ============================================================ */
 function buildInfoCard(c, balance = 0) {
-  const initials = c.prenom[0].toUpperCase() + c.nom[0].toUpperCase();
+  const initials = (c.prenom?.[0] || '').toUpperCase() + (c.nom?.[0] || '').toUpperCase();
   const tel2 = c.telephone2 ? `<br>${c.telephone2}` : '';
+  const insta = c.instagram ? `<br>Instagram : ${c.instagram}` : '';
   let balanceHtml = '';
   if (balance > 0) {
     balanceHtml = `<br><span style="color:var(--red)">Me doit ${fmtMoney(balance)}</span>`;
@@ -622,8 +623,8 @@ function buildInfoCard(c, balance = 0) {
   }
   return `<div class="info-av">${initials}</div>
     <div class="info-details">
-      <p><strong>${c.prenom} ${c.nom}</strong><br>
-      ${c.telephone || 'Non renseigné'}${tel2}${balanceHtml}</p>
+      <p><strong>${c.prenom || ''} ${c.nom || ''}</strong><br>
+      ${c.telephone || 'Non renseigné'}${tel2}${insta}${balanceHtml}</p>
     </div>`;
 }
 
@@ -1261,6 +1262,11 @@ function openModalCliente(cliente = null) {
       <label>Téléphone 2 <span style="font-weight:400;text-transform:none;letter-spacing:0">(optionnel)</span></label>
       <input type="tel" id="f-ctel2" placeholder="Ex : 0661 78 90 12"
              value="${cliente?.telephone2 || ''}">
+    </div>
+    <div class="form-group">
+      <label>Instagram <span style="font-weight:400;text-transform:none;letter-spacing:0">(optionnel)</span></label>
+      <input type="text" id="f-cinsta" placeholder="Ex : @amira_bensalem"
+             value="${cliente?.instagram || ''}">
     </div>`;
 
   const delClienteBtn = document.getElementById('modal-delete');
@@ -1291,7 +1297,8 @@ function openModalCliente(cliente = null) {
     const nom        = document.getElementById('f-cnom').value.trim();
     const telephone  = document.getElementById('f-ctel').value.trim();
     const telephone2 = document.getElementById('f-ctel2').value.trim();
-    if (!prenom || !nom) { toast('Veuillez saisir le nom complet'); return; }
+    const instagram  = document.getElementById('f-cinsta').value.trim();
+    if (!prenom && !nom) { toast('Veuillez saisir au moins un nom ou un prénom'); return; }
 
     if (cliente) {
       const { data: dup } = await db.from('clientes')
@@ -1299,12 +1306,12 @@ function openModalCliente(cliente = null) {
         .neq('id', cliente.id).maybeSingle();
       if (dup) { toast(`"${prenom} ${nom}" existe déjà dans la liste`); return; }
 
-      const { error } = await db.from('clientes').update({ prenom, nom, telephone, telephone2 }).eq('id', cliente.id);
+      const { error } = await db.from('clientes').update({ prenom, nom, telephone, telephone2, instagram }).eq('id', cliente.id);
       if (error) { toast('Erreur : ' + error.message); return; }
       if (state.histCliente?.id === cliente.id) {
-        state.histCliente = { ...cliente, prenom, nom, telephone, telephone2 };
+        state.histCliente = { ...cliente, prenom, nom, telephone, telephone2, instagram };
         document.getElementById('view-title').textContent = `${prenom} ${nom}`;
-        document.getElementById('historique-info').innerHTML = buildInfoCard({ prenom, nom, telephone, telephone2 });
+        document.getElementById('historique-info').innerHTML = buildInfoCard({ prenom, nom, telephone, telephone2, instagram });
       }
       closeModal(); toast('Cliente modifiée');
     } else {
@@ -1312,7 +1319,7 @@ function openModalCliente(cliente = null) {
         .select('id').ilike('nom', nom).ilike('prenom', prenom).maybeSingle();
       if (dup) { toast(`"${prenom} ${nom}" existe déjà dans la liste`); return; }
 
-      const { error } = await db.from('clientes').insert({ prenom, nom, telephone, telephone2 });
+      const { error } = await db.from('clientes').insert({ prenom, nom, telephone, telephone2, instagram });
       if (error) { toast('Erreur : ' + error.message); return; }
       closeModal(); toast('Cliente ajoutée'); renderClientes();
     }

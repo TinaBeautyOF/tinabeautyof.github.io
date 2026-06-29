@@ -16,9 +16,11 @@ CREATE TABLE IF NOT EXISTS public.prestations (
 -- Table : clientes
 CREATE TABLE IF NOT EXISTS public.clientes (
   id         UUID  DEFAULT gen_random_uuid() PRIMARY KEY,
-  nom        TEXT  NOT NULL,
-  prenom     TEXT  NOT NULL,
+  nom        TEXT,
+  prenom     TEXT,
   telephone  TEXT,
+  telephone2 TEXT,
+  instagram  TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
