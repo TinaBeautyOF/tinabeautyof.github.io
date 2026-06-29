@@ -1063,7 +1063,7 @@ function init() {
   document.getElementById('search-clientes').addEventListener('input', e => renderClientes(e.target.value));
 
   // Afficher le bouton d'import uniquement si l'API Contact Picker est disponible (iOS Safari 14.5+)
-  if ('contacts' in navigator && 'ContactsManager' in window) {
+  if ('contacts' in navigator) {
     document.getElementById('import-contacts-btn').classList.remove('hidden');
   }
   document.getElementById('import-contacts-btn').addEventListener('click', importFromContacts);
