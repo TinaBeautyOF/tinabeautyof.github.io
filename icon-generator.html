@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Générateur d'icônes — TinaBeauty</title>
+  <style>
+    body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 40px; background: #faf8f9; gap: 20px; }
+    h1 { color: #c9486e; }
+    p { color: #666; max-width: 480px; text-align: center; }
+    canvas { border-radius: 22%; box-shadow: 0 4px 20px rgba(201,72,110,0.3); }
+    button { background: #c9486e; color: white; border: none; padding: 12px 28px; border-radius: 10px; font-size: 16px; cursor: pointer; margin-top: 8px; }
+    button:hover { background: #a33058; }
+    .group { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .sizes { display: flex; gap: 40px; flex-wrap: wrap; justify-content: center; }
+  </style>
+</head>
+<body>
+  <h1>Générateur d'icônes TinaBeauty</h1>
+  <p>Cliquez sur chaque bouton pour télécharger l'icône correspondante, puis placez les fichiers PNG dans le dossier <strong>icons/</strong> de l'application.</p>
+
+  <div class="sizes" id="container"></div>
+
+  <script>
+    const sizes = [
+      { size: 180, name: 'icon-180.png', label: '180×180 (Apple Touch Icon)' },
+      { size: 192, name: 'icon-192.png', label: '192×192 (Android / PWA)' },
+      { size: 512, name: 'icon-512.png', label: '512×512 (Splash screen)' },
+    ];
+
+    function drawIcon(canvas) {
+      const s = canvas.width;
+      const ctx = canvas.getContext('2d');
+
+      // Background gradient
+      const grad = ctx.createLinearGradient(0, 0, s, s);
+      grad.addColorStop(0, '#e8607e');
+      grad.addColorStop(1, '#9e2f52');
+      ctx.fillStyle = grad;
+
+      // Rounded rect
+      const r = s * 0.22;
+      ctx.beginPath();
+      ctx.moveTo(r, 0);
+      ctx.lineTo(s - r, 0);
+      ctx.quadraticCurveTo(s, 0, s, r);
+      ctx.lineTo(s, s - r);
+      ctx.quadraticCurveTo(s, s, s - r, s);
+      ctx.lineTo(r, s);
+      ctx.quadraticCurveTo(0, s, 0, s - r);
+      ctx.lineTo(0, r);
+      ctx.quadraticCurveTo(0, 0, r, 0);
+      ctx.closePath();
+      ctx.fill();
+
+      // "TB" text
+      ctx.fillStyle = 'white';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `800 ${s * 0.38}px -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif`;
+      ctx.fillText('TB', s / 2, s * 0.54);
+
+      // Small dots
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.beginPath();
+      ctx.arc(s * 0.78, s * 0.22, s * 0.038, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.beginPath();
+      ctx.arc(s * 0.71, s * 0.14, s * 0.022, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const container = document.getElementById('container');
+
+    sizes.forEach(({ size, name, label }) => {
+      const div = document.createElement('div');
+      div.className = 'group';
+
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = size;
+      canvas.style.width = canvas.style.height = `${Math.min(size, 160)}px`;
+      drawIcon(canvas);
+
+      const lbl = document.createElement('p');
+      lbl.style.margin = '0';
+      lbl.textContent = label;
+
+      const btn = document.createElement('button');
+      btn.textContent = `Télécharger ${name}`;
+      btn.onclick = () => {
+        const link = document.createElement('a');
+        link.download = name;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      };
+
+      div.appendChild(canvas);
+      div.appendChild(lbl);
+      div.appendChild(btn);
+      container.appendChild(div);
+    });
+  </script>
+</body>
+</html>
