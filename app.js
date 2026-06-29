@@ -431,6 +431,47 @@ async function renderClientes(filter = '') {
 }
 
 /* ============================================================
+   IMPORT CONTACTS TÉLÉPHONE
+   ============================================================ */
+async function importFromContacts() {
+  try {
+    const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
+    if (!contacts.length) return;
+
+    let added = 0, skipped = 0, errors = 0;
+
+    for (const contact of contacts) {
+      const fullName  = (contact.name?.[0] || '').trim();
+      const telephone = (contact.tel?.[0] || '').trim();
+      if (!fullName) continue;
+
+      // Découper "Prénom Nom" — premier mot = prénom, reste = nom
+      const parts  = fullName.split(/\s+/);
+      const prenom = parts[0];
+      const nom    = parts.length > 1 ? parts.slice(1).join(' ') : prenom;
+
+      // Vérifier doublon
+      const { data: dup } = await db.from('clientes')
+        .select('id').ilike('nom', nom).ilike('prenom', prenom).maybeSingle();
+      if (dup) { skipped++; continue; }
+
+      const { error } = await db.from('clientes').insert({ prenom, nom, telephone });
+      if (error) errors++;
+      else added++;
+    }
+
+    let msg = `${added} cliente(s) importée(s)`;
+    if (skipped) msg += `, ${skipped} déjà existante(s)`;
+    if (errors)  msg += `, ${errors} erreur(s)`;
+    toast(msg);
+    if (added > 0) renderClientes();
+
+  } catch (err) {
+    if (err.name !== 'AbortError') toast('Import annulé ou non autorisé');
+  }
+}
+
+/* ============================================================
    EXPORT CSV
    ============================================================ */
 async function exportCSV() {
@@ -1020,6 +1061,12 @@ function init() {
   });
 
   document.getElementById('search-clientes').addEventListener('input', e => renderClientes(e.target.value));
+
+  // Afficher le bouton d'import uniquement si l'API Contact Picker est disponible (iOS Safari 14.5+)
+  if ('contacts' in navigator && 'ContactsManager' in window) {
+    document.getElementById('import-contacts-btn').classList.remove('hidden');
+  }
+  document.getElementById('import-contacts-btn').addEventListener('click', importFromContacts);
 
   document.getElementById('manage-cats-btn').addEventListener('click', openModalCategories);
 

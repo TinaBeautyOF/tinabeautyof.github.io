@@ -394,6 +394,18 @@ input, select { font-family: inherit; }
 .cliente-phone { font-size: 13px; color: var(--text-muted); margin-top: 3px; line-height: 1.5; }
 .cliente-arrow { color: #ddd; font-size: 18px; font-weight: 300; }
 
+.import-contacts-btn {
+  width: 100%; margin-bottom: 12px; padding: 13px;
+  background: linear-gradient(135deg, var(--primary-light), #fff5f8);
+  border: 1.5px solid var(--primary);
+  border-radius: var(--radius); font-size: 15px; font-weight: 700;
+  color: var(--primary); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  gap: 8px; box-shadow: var(--shadow-sm); transition: all .15s;
+}
+.import-contacts-btn:active { background: var(--primary-light); }
+.import-contacts-btn.hidden { display: none; }
+
 .export-btn {
   width: 100%; margin-top: 18px; padding: 14px;
   background: white; border: 1.5px solid var(--border);
