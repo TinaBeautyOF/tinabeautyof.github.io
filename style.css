@@ -52,6 +52,14 @@ input, select { font-family: inherit; }
    ============================================================ */
 #app { display: flex; flex-direction: column; height: 100vh; height: -webkit-fill-available; }
 
+.offline-banner {
+  background: var(--red-bg); color: var(--red);
+  text-align: center; padding: 6px 12px;
+  font-size: 12px; font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.offline-banner.hidden { display: none; }
+
 /* HEADER */
 .app-header {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
@@ -381,6 +389,7 @@ input, select { font-family: inherit; }
    CLIENTES
    ============================================================ */
 .search-bar { margin-bottom: 14px; }
+.search-bar.planning-search { margin-top: -4px; margin-bottom: 12px; }
 .search-bar input {
   width: 100%; padding: 12px 18px;
   border: 1.5px solid var(--border); border-radius: 50px;
@@ -466,6 +475,12 @@ input, select { font-family: inherit; }
 .histo-prests { font-size: 14px; font-weight: 500; color: var(--text); }
 .histo-total { font-size: 13px; color: var(--gold); font-weight: 600; margin-top: 4px; font-family: 'Playfair Display', serif; }
 .histo-balance { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+.histo-notes {
+  font-size: 13px; color: var(--text-muted);
+  margin-top: 8px; padding: 10px 12px;
+  background: var(--primary-light); border-radius: var(--radius-xs);
+  border-left: 3px solid var(--primary-mid);
+}
 
 .histo-status-row {
   display: flex; gap: 6px; margin-top: 10px;
@@ -608,14 +623,19 @@ input, select { font-family: inherit; }
   color: var(--text-muted); margin-bottom: 7px;
 }
 .form-group input,
-.form-group select {
+.form-group select,
+.form-group textarea {
   width: 100%; padding: 13px 15px;
   border: 1.5px solid var(--border); border-radius: var(--radius-sm);
   font-size: 16px; color: var(--text); background: #fafafa; outline: none;
   -webkit-appearance: none; appearance: none; transition: all .2s;
 }
+.form-group textarea {
+  resize: vertical; min-height: 80px;
+}
 .form-group input:focus,
-.form-group select:focus {
+.form-group select:focus,
+.form-group textarea:focus {
   border-color: var(--primary); background: #fff;
   box-shadow: 0 0 0 3px rgba(232,180,184,.25);
 }

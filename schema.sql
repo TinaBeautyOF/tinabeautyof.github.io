@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS public.rendezvous (
   date        DATE  NOT NULL,
   creneau     TEXT  NOT NULL,
   cliente_id  UUID  REFERENCES public.clientes(id) ON DELETE SET NULL,
+  notes       TEXT,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 

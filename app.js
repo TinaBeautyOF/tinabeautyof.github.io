@@ -27,6 +27,7 @@ const state = {
   selClienteId: null,
   selClienteNom: '',
   financesTab:  'achats',
+  rdvSearch:    '',
 };
 
 /* ============================================================
@@ -120,6 +121,142 @@ function toast(msg) {
 }
 
 /* ============================================================
+   NOTIFICATIONS
+   ============================================================ */
+function requestNotificationPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+}
+
+async function checkNotifications() {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+  const now    = new Date();
+  const hour   = now.getHours();
+  const today  = toISO(now);
+
+  const lastMorning = localStorage.getItem('tb_last_morning_notif');
+  const lastEvening = localStorage.getItem('tb_last_evening_notif');
+
+  // Rappel du matin (8h) : RDV de la journée
+  if (hour >= 8 && lastMorning !== today) {
+    const rdvs = await loadRdvRange(today, today);
+    if (rdvs.length) {
+      const list = rdvs.map(r => `${r.creneau} — ${r.clientes?.prenom || ''} ${r.clientes?.nom || ''}`).join('\n');
+      sendNotification('TinaBeauty — RDV aujourd\'hui', `Tu as ${rdvs.length} rendez-vous aujourd\'hui.\n${list}`);
+    }
+    localStorage.setItem('tb_last_morning_notif', today);
+  }
+
+  // Rappel du soir (20h) : RDV du lendemain
+  if (hour >= 20 && lastEvening !== today) {
+    const tomorrow = toISO(addDays(now, 1));
+    const rdvs = await loadRdvRange(tomorrow, tomorrow);
+    if (rdvs.length) {
+      const list = rdvs.map(r => `${r.creneau} — ${r.clientes?.prenom || ''} ${r.clientes?.nom || ''}`).join('\n');
+      sendNotification('TinaBeauty — RDV demain', `Tu as ${rdvs.length} rendez-vous demain.\n${list}`);
+    }
+    localStorage.setItem('tb_last_evening_notif', today);
+  }
+}
+
+function sendNotification(title, body) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  new Notification(title, { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png' });
+}
+
+/* ============================================================
+   MODE HORS LIGNE — File d'attente
+   ============================================================ */
+const QUEUE_KEY = 'tb_offline_queue';
+
+function isOnline() { return navigator.onLine; }
+
+function getQueue() {
+  try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); }
+  catch { return []; }
+}
+function saveQueue(q) { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); }
+function addToQueue(action) {
+  const q = getQueue();
+  q.push(action);
+  saveQueue(q);
+}
+function clearQueue() { localStorage.removeItem(QUEUE_KEY); }
+
+function showOfflineBanner() {
+  document.getElementById('offline-banner')?.classList.remove('hidden');
+}
+function hideOfflineBanner() {
+  document.getElementById('offline-banner')?.classList.add('hidden');
+}
+function updateOnlineStatus() {
+  if (isOnline()) {
+    hideOfflineBanner();
+    processQueue();
+  } else {
+    showOfflineBanner();
+  }
+}
+
+async function processQueue() {
+  const q = getQueue();
+  if (!q.length) return;
+  if (!isOnline()) return;
+
+  toast('Synchronisation en cours…');
+  let errors = 0;
+  for (const action of q) {
+    try {
+      if (action.type === 'createRdv') await createRdvFromQueue(action.payload);
+      else if (action.type === 'updateStatut') await updateStatut(action.payload.rdvId, action.payload.statut);
+      else if (action.type === 'deleteRdv') await db.from('rendezvous').delete().eq('id', action.payload.rdvId);
+    } catch (e) {
+      console.error('Sync error', e);
+      errors++;
+    }
+  }
+
+  if (errors === 0) {
+    clearQueue();
+    toast('Synchronisation terminée');
+  } else {
+    // Conserver les actions non traitées
+    const remaining = q.slice(-errors);
+    saveQueue(remaining);
+    toast('Certaines actions n\'ont pas pu être synchronisées');
+  }
+
+  renderPlanning();
+  if (state.view === 'accueil') renderAccueil();
+}
+
+async function createRdvFromQueue(payload) {
+  // Vérifier doublon
+  const { data: conflict } = await db.from('rendezvous')
+    .select('id').eq('date', payload.date).eq('creneau', payload.creneau).maybeSingle();
+  if (conflict) { toast(`Créneau ${payload.creneau} déjà pris`); return; }
+
+  const { data: newRdv, error } = await db.from('rendezvous')
+    .insert({
+      date: payload.date, creneau: payload.creneau,
+      cliente_id: payload.cliente_id,
+      credit: payload.credit, solde: payload.solde,
+      notes: payload.notes
+    })
+    .select().single();
+  if (error) throw error;
+
+  if (newRdv && payload.prestationIds?.length) {
+    await db.from('rendezvous_prestations').insert(
+      payload.prestationIds.map(id => ({ rendezvous_id: newRdv.id, prestation_id: id }))
+    );
+  }
+}
+
+/* ============================================================
    ROUTER
    ============================================================ */
 function navigateTo(viewName, skipTab = false) {
@@ -197,7 +334,7 @@ async function loadRdvRange(from, to) {
   const { data, error } = await db
     .from('rendezvous')
     .select(`
-      id, date, creneau, statut, credit, solde, cliente_id,
+      id, date, creneau, statut, credit, solde, cliente_id, notes,
       clientes ( id, nom, prenom ),
       rendezvous_prestations (
         prestation_id,
@@ -216,7 +353,7 @@ async function loadAllClientRdvs(clienteId) {
   const { data, error } = await db
     .from('rendezvous')
     .select(`
-      id, date, creneau, statut, credit, solde, cliente_id,
+      id, date, creneau, statut, credit, solde, cliente_id, notes,
       rendezvous_prestations ( prestations ( id, nom, prix ) )
     `)
     .eq('cliente_id', clienteId)
@@ -253,16 +390,17 @@ function fillAccueilList(containerId, rdvs, showStatus) {
     const c      = r.clientes;
     const prests = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
     const total  = calcRdvTotal(r);
-    const balanceNote = (r.credit || r.solde)
-      ? `<span class="rdv-prests">${fmtMoney(total)} — ${r.credit ? 'crédit ' + fmtMoney(r.credit) : 'solde ' + fmtMoney(r.solde)}</span>`
-      : `<span class="rdv-prests">${prests.join(' · ') || 'Aucune prestation'}</span>`;
+    let infoNote = (r.credit || r.solde)
+      ? `${fmtMoney(total)} — ${r.credit ? 'crédit ' + fmtMoney(r.credit) : 'solde ' + fmtMoney(r.solde)}`
+      : (prests.join(' · ') || 'Aucune prestation');
+    if (r.notes) infoNote += ' · note';
 
     return `<div class="rdv-card" data-rdv="${r.id}" data-date="${r.date}" data-cr="${r.creneau}">
       <div class="rdv-card-top">
         <div class="rdv-time">${r.creneau}</div>
         <div class="rdv-info">
           <div class="rdv-client">${c ? c.prenom + ' ' + c.nom : '—'}</div>
-          ${balanceNote}
+          <span class="rdv-prests">${infoNote}</span>
         </div>
       </div>
       ${showStatus ? renderStatusButtons(r, 'rdv') : ''}
@@ -281,12 +419,17 @@ function fillAccueilList(containerId, rdvs, showStatus) {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       await updateStatut(btn.dataset.id, btn.dataset.s);
-      renderAccueil();
+      if (isOnline()) renderAccueil();
     });
   });
 }
 
 async function updateStatut(rdvId, statut) {
+  if (!isOnline()) {
+    addToQueue({ type: 'updateStatut', payload: { rdvId, statut } });
+    toast('Statut enregistré hors ligne. Synchronisation au retour de la connexion.');
+    return;
+  }
   const { error } = await db.from('rendezvous').update({ statut }).eq('id', rdvId);
   if (error) { toast('Erreur : ' + error.message); return; }
   toast(statut === 'presente' ? 'Marquée présente' : 'Marquée absente');
@@ -334,8 +477,21 @@ async function renderPlanning() {
     });
   });
 
-  // Afficher la vue du jour sélectionné
-  if (state.selectedDay) {
+  // Afficher la vue du jour sélectionné ou les résultats de recherche
+  const searchInput = document.getElementById('search-rdvs');
+  if (searchInput) searchInput.value = state.rdvSearch;
+
+  if (state.rdvSearch.trim()) {
+    const q = state.rdvSearch.toLowerCase().trim();
+    const filtered = rdvs.filter(r => {
+      const c = r.clientes || {};
+      const fullName = `${c.prenom || ''} ${c.nom || ''}`.toLowerCase();
+      return fullName.includes(q) ||
+             (c.telephone || '').includes(q) ||
+             (c.instagram || '').toLowerCase().includes(q);
+    }).sort((a, b) => a.date.localeCompare(b.date) || a.creneau.localeCompare(b.creneau));
+    renderDayView('search', filtered, `Résultats pour "${state.rdvSearch}"`);
+  } else if (state.selectedDay) {
     const dayRdvs = rdvs
       .filter(r => r.date === state.selectedDay)
       .sort((a, b) => a.creneau.localeCompare(b.creneau));
@@ -346,12 +502,12 @@ async function renderPlanning() {
 }
 
 /* Niveau 2 : rendez-vous du jour */
-function renderDayView(dateStr, rdvs) {
-  const dateObj = new Date(dateStr + 'T12:00:00');
+function renderDayView(dateStr, rdvs, customTitle = null) {
+  const dateObj = dateStr !== 'search' ? new Date(dateStr + 'T12:00:00') : null;
   const dv = document.getElementById('day-view');
 
   let html = `<div class="day-view-header">
-    <span class="day-view-title">${fmtDayFull(dateObj)}</span>
+    <span class="day-view-title">${customTitle || (dateObj ? fmtDayFull(dateObj) : '')}</span>
     <button class="add-rdv-btn" id="add-rdv-day">+ RDV</button>
   </div>`;
 
@@ -363,9 +519,10 @@ function renderDayView(dateStr, rdvs) {
       const prests  = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
       const annule  = r.statut === 'annule';
       const total   = calcRdvTotal(r);
-      const balanceNote = (!annule && (r.credit || r.solde))
+      let balanceNote = (!annule && (r.credit || r.solde))
         ? (r.credit ? 'crédit ' + fmtMoney(r.credit) : 'solde ' + fmtMoney(r.solde))
         : (annule ? 'Annulé' : (prests.join(' · ') || 'Aucune prestation'));
+      if (r.notes) balanceNote += ' · note';
       return `<div class="day-rdv-card ${annule ? 'annule' : ''}" data-rdv="${r.id}" data-date="${r.date}" data-cr="${r.creneau}">
         <span class="day-rdv-time">${r.creneau}</span>
         <div class="day-rdv-info">
@@ -609,7 +766,7 @@ async function exportCSV() {
 /* ============================================================
    HISTORIQUE
    ============================================================ */
-function buildInfoCard(c, balance = 0) {
+function buildInfoCard(c, balance = 0, presentCount = 0) {
   const initials = (c.prenom?.[0] || '').toUpperCase() + (c.nom?.[0] || '').toUpperCase();
   const tel2 = c.telephone2 ? `<br>${c.telephone2}` : '';
   const insta = c.instagram ? `<br>Instagram : ${c.instagram}` : '';
@@ -621,10 +778,15 @@ function buildInfoCard(c, balance = 0) {
   } else {
     balanceHtml = `<br><span>Solde à jour</span>`;
   }
+
+  const rewardHtml = presentCount >= 6
+    ? `<br><span style="color:var(--green);font-weight:600">Fidélité : ${presentCount} RDV présents — récompense disponible !</span>`
+    : `<br><span>Fidélité : ${presentCount} / 6 RDV présents</span>`;
+
   return `<div class="info-av">${initials}</div>
     <div class="info-details">
       <p><strong>${c.prenom || ''} ${c.nom || ''}</strong><br>
-      ${c.telephone || 'Non renseigné'}${tel2}${insta}${balanceHtml}</p>
+      ${c.telephone || 'Non renseigné'}${tel2}${insta}${balanceHtml}${rewardHtml}</p>
     </div>`;
 }
 
@@ -633,7 +795,8 @@ async function openHistorique(cliente) {
   navigateTo('historique', true);
   const rdvs = await loadAllClientRdvs(cliente.id);
   const balance = calcClientBalance(cliente.id, rdvs);
-  document.getElementById('historique-info').innerHTML = buildInfoCard(cliente, balance);
+  const presentCount = (rdvs || []).filter(r => r.statut === 'presente').length;
+  document.getElementById('historique-info').innerHTML = buildInfoCard(cliente, balance, presentCount);
 
   const listEl = document.getElementById('historique-list');
   listEl.innerHTML = '<div class="loader">Chargement…</div>';
@@ -675,11 +838,14 @@ async function openHistorique(cliente) {
     if (r.credit) balanceHtml += `<span style="color:var(--red)">Crédit ${fmtMoney(r.credit)}</span> `;
     if (r.solde)  balanceHtml += `<span style="color:var(--green)">Solde ${fmtMoney(r.solde)}</span>`;
 
+    const notesHtml = r.notes ? `<div class="histo-notes">${r.notes}</div>` : '';
+
     return `<div class="histo-card">
       <div class="histo-date">${fmtFull(dateObj)} à ${r.creneau}</div>
       <div class="histo-prests">${prests.join(', ') || 'Aucune prestation'}</div>
       ${totalHtml}
       ${balanceHtml ? `<div class="histo-balance">${balanceHtml}</div>` : ''}
+      ${notesHtml}
       ${renderStatusButtons(r, 'histo')}
     </div>`;
   }).join('');
@@ -687,7 +853,7 @@ async function openHistorique(cliente) {
   listEl.querySelectorAll('.histo-status-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       await updateStatut(btn.dataset.id, btn.dataset.s);
-      openHistorique(state.histCliente);
+      if (isOnline()) openHistorique(state.histCliente);
     });
   });
 }
@@ -958,6 +1124,10 @@ async function openModalRdv(date, creneau, rdvId) {
         <input type="number" id="f-solde" inputmode="numeric" value="${rdvData?.solde || 0}">
       </div>
     </div>
+    <div class="form-group">
+      <label>Notes</label>
+      <textarea id="f-notes" rows="3" placeholder="Allergies, préférences, forme, couleur…">${rdvData?.notes || ''}</textarea>
+    </div>
     <div id="solde-cliente-hint" class="solde-hint"></div>
     ${rdvId ? `<button type="button" id="annuler-rdv-btn" class="btn-annuler">Annuler ce rendez-vous</button>` : ''}`;
 
@@ -1065,6 +1235,7 @@ async function openModalRdv(date, creneau, rdvId) {
     const heureVal  = document.getElementById('f-heure').value;
     const creditVal = parseFloat(document.getElementById('f-credit').value) || 0;
     const soldeVal  = parseFloat(document.getElementById('f-solde').value)  || 0;
+    const notesVal  = document.getElementById('f-notes').value.trim();
 
     if (!dateVal)             { toast('Veuillez choisir une date'); return; }
     if (!heureVal)            { toast('Veuillez saisir l\'heure'); return; }
@@ -1073,7 +1244,7 @@ async function openModalRdv(date, creneau, rdvId) {
     if (rdvId) {
       await db.from('rendezvous').update({
         date: dateVal, creneau: heureVal, cliente_id: state.selClienteId,
-        credit: creditVal, solde: soldeVal
+        credit: creditVal, solde: soldeVal, notes: notesVal
       }).eq('id', rdvId);
 
       await db.from('rendezvous_prestations').delete().eq('rendezvous_id', rdvId);
@@ -1084,13 +1255,26 @@ async function openModalRdv(date, creneau, rdvId) {
       }
       closeModal(); toast('Rendez-vous modifié'); renderPlanning();
     } else {
+      if (!isOnline()) {
+        addToQueue({
+          type: 'createRdv',
+          payload: {
+            date: dateVal, creneau: heureVal, cliente_id: state.selClienteId,
+            credit: creditVal, solde: soldeVal, notes: notesVal,
+            prestationIds: state.selPrestIds.map(p => p.id)
+          }
+        });
+        closeModal(); toast('RDV enregistré hors ligne. Synchronisation au retour de la connexion.');
+        return;
+      }
+
       // Vérifier doublon
       const { data: conflict } = await db.from('rendezvous')
         .select('id').eq('date', dateVal).eq('creneau', heureVal).maybeSingle();
       if (conflict) { toast('Ce créneau est déjà pris'); return; }
 
       const { data: newRdv, error } = await db.from('rendezvous')
-        .insert({ date: dateVal, creneau: heureVal, cliente_id: state.selClienteId, credit: creditVal, solde: soldeVal })
+        .insert({ date: dateVal, creneau: heureVal, cliente_id: state.selClienteId, credit: creditVal, solde: soldeVal, notes: notesVal })
         .select().single();
       if (error) { toast('Erreur : ' + error.message); return; }
 
@@ -1326,7 +1510,11 @@ function openModalCliente(cliente = null) {
       if (state.histCliente?.id === cliente.id) {
         state.histCliente = { ...cliente, prenom, nom, telephone, telephone2, instagram };
         document.getElementById('view-title').textContent = `${prenom} ${nom}`;
-        document.getElementById('historique-info').innerHTML = buildInfoCard({ prenom, nom, telephone, telephone2, instagram });
+        loadAllClientRdvs(cliente.id).then(rdvs => {
+          const balance = calcClientBalance(cliente.id, rdvs);
+          const presentCount = (rdvs || []).filter(r => r.statut === 'presente').length;
+          document.getElementById('historique-info').innerHTML = buildInfoCard({ prenom, nom, telephone, telephone2, instagram }, balance, presentCount);
+        });
       }
       closeModal(); toast('Cliente modifiée');
     } else {
@@ -1384,6 +1572,11 @@ function init() {
 
   document.getElementById('search-clientes').addEventListener('input', e => renderClientes(e.target.value));
 
+  document.getElementById('search-rdvs')?.addEventListener('input', e => {
+    state.rdvSearch = e.target.value;
+    renderPlanning();
+  });
+
   // Android : Contact Picker API
   if ('contacts' in navigator) {
     document.getElementById('import-contacts-btn').classList.remove('hidden');
@@ -1411,6 +1604,14 @@ function init() {
   });
 
   navigateTo('accueil');
+
+  requestNotificationPermission();
+  checkNotifications();
+  setInterval(checkNotifications, 60000);
+
+  window.addEventListener('online', updateOnlineStatus);
+  window.addEventListener('offline', updateOnlineStatus);
+  updateOnlineStatus();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW:', err));

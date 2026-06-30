@@ -53,7 +53,11 @@ ALTER TABLE public.clientes
 ADD COLUMN IF NOT EXISTS telephone2 TEXT,
 ADD COLUMN IF NOT EXISTS instagram  TEXT;
 
--- 6. Nouvelle table : achats du salon
+-- 6. Ajouter le champ notes sur rendezvous
+ALTER TABLE public.rendezvous
+ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- 7. Nouvelle table : achats du salon
 CREATE TABLE IF NOT EXISTS public.achats (
   id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   nom        TEXT NOT NULL,
