@@ -656,14 +656,29 @@ async function openHistorique(cliente) {
     const prests = (r.rendezvous_prestations || []).map(rp => rp.prestations?.nom).filter(Boolean);
     const total  = calcRdvTotal(r);
     const enc    = total - (r.credit || 0) + (r.solde || 0);
+    const statut = r.statut || 'en_attente';
     const dateObj = new Date(r.date + 'T12:00:00');
+
+    let totalHtml = '';
+    if (total > 0) {
+      if (statut === 'presente') {
+        totalHtml = `<div class="histo-total">${fmtMoney(total)} · encaissé ${fmtMoney(enc)}</div>`;
+      } else if (statut === 'absente') {
+        totalHtml = `<div class="histo-total">${fmtMoney(total)} · cliente absente</div>`;
+      } else if (statut === 'en_attente') {
+        totalHtml = `<div class="histo-total">${fmtMoney(total)} · en attente</div>`;
+      }
+      // annule : le badge est déjà affiché par renderStatusButtons
+    }
+
     let balanceHtml = '';
     if (r.credit) balanceHtml += `<span style="color:var(--red)">Crédit ${fmtMoney(r.credit)}</span> `;
     if (r.solde)  balanceHtml += `<span style="color:var(--green)">Solde ${fmtMoney(r.solde)}</span>`;
+
     return `<div class="histo-card">
       <div class="histo-date">${fmtFull(dateObj)} à ${r.creneau}</div>
       <div class="histo-prests">${prests.join(', ') || 'Aucune prestation'}</div>
-      ${total > 0 ? `<div class="histo-total">${fmtMoney(total)} · encaissé ${fmtMoney(enc)}</div>` : ''}
+      ${totalHtml}
       ${balanceHtml ? `<div class="histo-balance">${balanceHtml}</div>` : ''}
       ${renderStatusButtons(r, 'histo')}
     </div>`;
