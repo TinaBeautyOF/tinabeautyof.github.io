@@ -31,6 +31,7 @@
   --header-h:      58px;
   --safe-top:      env(safe-area-inset-top, 0px);
   --safe-bottom:   env(safe-area-inset-bottom, 0px);
+  --kb-inset:      0px;   /* hauteur du clavier iOS (mise à jour en JS) */
 }
 
 /* ============================================================
@@ -50,7 +51,7 @@ input, select { font-family: inherit; }
 /* ============================================================
    APP SHELL
    ============================================================ */
-#app { display: flex; flex-direction: column; height: 100vh; height: -webkit-fill-available; }
+#app { display: flex; flex-direction: column; height: 100vh; height: -webkit-fill-available; height: 100dvh; }
 
 .offline-banner {
   background: var(--red-bg); color: var(--red);
@@ -117,6 +118,7 @@ input, select { font-family: inherit; }
   border-top: 1px solid var(--border);
   padding-bottom: var(--safe-bottom);
   box-shadow: 0 -6px 18px -14px rgba(107,87,80,.35);
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   height: calc(var(--tab-h) + var(--safe-bottom));
 }
@@ -393,7 +395,7 @@ input, select { font-family: inherit; }
 .search-bar input {
   width: 100%; padding: 12px 18px;
   border: 1.5px solid var(--border); border-radius: 50px;
-  font-size: 15px; background: var(--bg-card); outline: none;
+  font-size: 16px; background: var(--bg-card); outline: none;
   box-shadow: var(--shadow-xs); -webkit-appearance: none;
   transition: border-color .2s, box-shadow .2s;
 }
@@ -568,13 +570,17 @@ input, select { font-family: inherit; }
   position: fixed; inset: 0;
   background: rgba(107,87,80,0.45);
   z-index: 200; display: flex; align-items: flex-end;
+  -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
+  /* iOS : remonte la modale au-dessus du clavier */
+  padding-bottom: var(--kb-inset, 0px);
+  transition: padding-bottom .2s ease;
 }
 .modal-overlay.hidden { display: none; }
 
 .modal {
   background: #fff; border-radius: 26px 26px 0 0;
-  width: 100%; max-height: 90vh;
+  width: 100%; max-height: calc(90vh - var(--kb-inset, 0px));
   display: flex; flex-direction: column;
   padding-bottom: var(--safe-bottom);
   animation: slideUp .28s cubic-bezier(.32,.72,0,1);
@@ -636,8 +642,20 @@ input, select { font-family: inherit; }
 .form-group input:focus,
 .form-group select:focus,
 .form-group textarea:focus {
-  border-color: var(--primary); background: #fff;
+  border-color: var(--primary); background-color: #fff;
   box-shadow: 0 0 0 3px rgba(232,180,184,.25);
+}
+
+/* iOS — normaliser la hauteur des champs date / heure (sinon ils se tassent) */
+.form-group input[type="date"],
+.form-group input[type="time"] {
+  min-height: 50px; line-height: 1.2; text-align: left;
+}
+/* iOS masque l'indicateur du select avec appearance:none → on remet une flèche */
+.form-group select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23A8978F' d='M6 8 0 2 1.4.6 6 5.2 10.6.6 12 2z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 15px center;
+  padding-right: 40px;
 }
 
 /* Search-select */
@@ -705,7 +723,7 @@ input, select { font-family: inherit; }
 .cat-add-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .cat-add-row input {
   flex: 1 1 0; min-width: 0; padding: 12px 14px; border: 1.5px solid var(--border);
-  border-radius: var(--radius-xs); font-size: 15px; outline: none;
+  border-radius: var(--radius-xs); font-size: 16px; outline: none;
 }
 .cat-add-row input:focus { border-color: var(--primary); }
 .cat-add-row button {
@@ -755,6 +773,7 @@ input, select { font-family: inherit; }
   opacity: 0; transition: opacity .25s, transform .25s;
   pointer-events: none; white-space: nowrap;
   max-width: 90vw; text-align: center;
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   box-shadow: var(--shadow);
 }

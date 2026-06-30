@@ -1570,6 +1570,23 @@ function init() {
     if (e.target === document.getElementById('modal-overlay')) closeModal();
   });
 
+  // iOS — le clavier ne redimensionne pas la fenêtre : on remonte la modale au-dessus
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const adjustForKeyboard = () => {
+      const overlap = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+      document.documentElement.style.setProperty('--kb-inset', overlap + 'px');
+    };
+    vv.addEventListener('resize', adjustForKeyboard);
+    vv.addEventListener('scroll', adjustForKeyboard);
+  }
+  // Garder le champ en cours de saisie visible au-dessus du clavier
+  document.getElementById('modal-body').addEventListener('focusin', e => {
+    if (e.target.matches('input, textarea, select')) {
+      setTimeout(() => e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
+    }
+  });
+
   document.getElementById('search-clientes').addEventListener('input', e => renderClientes(e.target.value));
 
   document.getElementById('search-rdvs')?.addEventListener('input', e => {
